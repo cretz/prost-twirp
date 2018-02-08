@@ -24,6 +24,17 @@ pub struct TwirpError {
     pub err_desc: String,
 }
 
+impl TwirpError {
+    pub fn new(error_type: &str, msg: &str, meta: serde_json::Value) -> TwirpError {
+        TwirpError {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            meta,
+            err_desc: format!("{} - {}", error_type, msg)
+        }
+    }
+}
+
 impl fmt::Display for TwirpError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(error::Error::description(self))
@@ -81,7 +92,7 @@ impl HyperClient {
     pub fn new(client: Client<HttpConnector, Body>, root_url: &str) -> HyperClient {
         HyperClient {
             client,
-            root_url: String::from(root_url),
+            root_url: root_url.trim_right_matches('/').to_string(),
             json: false,
             protobuf_content_type: ContentType("application/protobuf".parse().unwrap()),
         }
@@ -90,7 +101,7 @@ impl HyperClient {
     pub fn go<I: Message, O: Message + Default + 'static>(&self, url_path: &str, i: I) ->
             Box<Future<Item=ServiceResponse<HyperResponseHead, O>, Error=HyperClientError>> {
         // Make the URI
-        let uri = match format!("{}/{}", self.root_url, url_path).parse() {
+        let uri = match format!("{}/{}", self.root_url, url_path.trim_left_matches('/')).parse() {
             Ok(v) => v,
             Err(err) => return Box::new(future::err(HyperClientError::HyperError(hyper::Error::Uri(err))))
         };
@@ -129,8 +140,26 @@ impl HyperClient {
                                 ))
                             }
                         } else {
-                            // TODO
-                            panic!("TODO: http error handling")
+                            match serde_json::from_slice::<serde_json::Value>(body.to_vec().as_slice()) {
+                                Ok(v) => {
+                                    let code = v["code"].as_str();
+                                    let twirp_err = TwirpError::new(
+                                        code.unwrap_or("<no code>"),
+                                        v["msg"].as_str().unwrap_or("<no message>"),
+                                        // Put the whole thing as meta if there was no code
+                                        if code.is_some() { v["meta"].clone() } else { v.clone() }
+                                    );
+                                    Err(HyperClientError::TwirpError(
+                                        HyperPostResponseError {
+                                            resp: resp_head, body: body.to_vec(),
+                                            err: Box::new(twirp_err)
+                                        }
+                                    ))
+                                },
+                                Err(err) => Err(HyperClientError::JsonDecodeError(
+                                    HyperPostResponseError { resp: resp_head, body: body.to_vec(), err: Box::new(err) }
+                                ))
+                            }
                         }
                     })
             }))

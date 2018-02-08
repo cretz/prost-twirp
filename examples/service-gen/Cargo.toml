@@ -1,5 +1,5 @@
 [package]
-name = "example-no-service-gen"
+name = "example-service-gen"
 version = "0.1.0"
 authors = ["Chad Retz <chad.retz@gmail.com>"]
 build = "build.rs"
@@ -15,3 +15,4 @@ tokio-core = "0.1"
 
 [build-dependencies]
 prost-build = "0.3"
+prost-twirp = { path = "../../", features = ["service-gen"] }
