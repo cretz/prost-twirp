@@ -6,11 +6,38 @@ extern crate prost_derive;
 extern crate prost_twirp;
 extern crate tokio_core;
 
+use futures::Future;
+use futures::future;
+use hyper::Client;
+use prost_twirp::HyperClient;
+use std::env;
+use tokio_core::reactor::Core;
+
 mod service {
     include!(concat!(env!("OUT_DIR"), "/twitch.twirp.example.rs"));
 }
 
+use service::Haberdasher;
+
 fn main() {
-    println!("Yay");
-    // TODO
+    let mut core = Core::new().unwrap();
+    let run_server = env::args().any(|s| s == "--server");
+    let run_client = !run_server || env::args().any(|s| s == "--client");
+
+    // TODO: run server
+
+    if run_client {
+        let hyper_client = Client::new(&core.handle());
+        let prost_client = HyperClient::new(hyper_client, "http://localhost:8080");
+        let service_client = service::HaberdasherClient(prost_client);
+        // Run the 5 like the other client
+        let work = future::join_all((0..5).map(|_|
+            service_client.make_hat(service::Size { inches: 12 }).
+                and_then(|res| {
+                    let hat: service::Hat = res.rpc_response;
+                    Ok(println!("Made {:?}", hat))
+                })
+        ));
+        core.run(work).unwrap();
+    }
 }
