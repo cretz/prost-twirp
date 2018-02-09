@@ -1,0 +1,18 @@
+[package]
+name = "example-service-gen-no-runtime"
+version = "0.1.0"
+authors = ["Chad Retz <chad.retz@gmail.com>"]
+build = "build.rs"
+
+[dependencies]
+bytes = "0.4"
+futures = "0.1"
+hyper = "0.11"
+prost = "0.3"
+prost-derive = "0.3"
+serde_json = "1.0"
+tokio-core = "0.1"
+
+[build-dependencies]
+prost-build = "0.3"
+prost-twirp = { path = "../../", features = ["service-gen"] }

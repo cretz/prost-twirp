@@ -3,7 +3,7 @@ extern crate hyper;
 extern crate prost;
 #[macro_use]
 extern crate prost_derive;
-extern crate prost_twirp;
+extern crate serde_json;
 extern crate tokio_core;
 
 use futures::Future;
