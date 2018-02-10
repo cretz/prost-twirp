@@ -30,9 +30,9 @@ fn main() {
         // Run the 5 like the other client
         let work = future::join_all((0..5).map(|_|
             prost_client.
-                go("/twirp/twitch.twirp.example.Haberdasher/MakeHat", service::Size { inches: 12 }).
+                go("/twirp/twitch.twirp.example.Haberdasher/MakeHat", service::Size { inches: 12 }.into()).
                 and_then(|res| {
-                    let hat: service::Hat = res.rpc_response;
+                    let hat: service::Hat = res.output;
                     Ok(println!("Made {:?}", hat))
                 })
         ));

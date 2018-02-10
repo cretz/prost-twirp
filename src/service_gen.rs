@@ -1,68 +1,84 @@
-use prost_build::{Service, ServiceGenerator};
+use prost_build::{Method, Service, ServiceGenerator};
 
+#[derive(Default)]
 pub struct TwirpServiceGenerator {
     pub embed_client: bool,
+    type_aliases_added: bool,
 }
 
-impl ServiceGenerator for TwirpServiceGenerator {
-    fn generate(&mut self, service: Service, buf: &mut String) {
-        let prost_twirp_mod = if self.embed_client { "prost_twirp" } else { "::prost_twirp" };
-        // Generate the main trait
+impl TwirpServiceGenerator {
+    pub fn new() -> TwirpServiceGenerator { Default::default() }
+
+    fn prost_twirp_mod(&self) -> &str { if self.embed_client { "prost_twirp" } else { "::prost_twirp" } }
+
+    fn generate_type_aliases(&mut self, buf: &mut String) {
+        if self.type_aliases_added { return; }
+        self.type_aliases_added = true;
+        buf.push_str(&format!(
+            "\n\
+            type PTReq<I> = {0}::ServiceRequest<I>;\n\
+            type PTRes<O> = Box<::futures::Future<Item={0}::ServiceResponse<O>, Error={0}::ProstTwirpError>>;\n",
+            self.prost_twirp_mod()));
+    }
+
+    fn generate_main_trait(&self, service: &Service, buf: &mut String) {
         buf.push_str("\n");
         service.comments.append_with_indent(0, buf);
-        buf.push_str(&format!("pub trait {}<R, E> {{\n", service.name));
+        buf.push_str(&format!("pub trait {} {{", service.name));
         for method in service.methods.iter() {
+            buf.push_str("\n");
             method.comments.append_with_indent(1, buf);
-            buf.push_str(&format!(
-                "    fn {}(&self, i: {}) -> Box<::futures::Future<Item={}::ServiceResponse<R, {}>, Error=E>>;\n",
-                method.name, method.input_type, prost_twirp_mod, method.output_type));
-        }
-        buf.push_str("}\n");
-
-        // Add a client constructor for the main trait
-        buf.push_str(&format!("\n#[allow(dead_code)]\nimpl {}<{}::HyperResponseHead, {}::HyperClientError> {{\n",
-            service.name, prost_twirp_mod, prost_twirp_mod));
-        buf.push_str(&format!(
-            "    pub fn new_client(client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>, root_url: &str) -> Box<{}<{}::HyperResponseHead, {}::HyperClientError>> {{\n",
-            service.name, prost_twirp_mod, prost_twirp_mod
-        ));
-        buf.push_str(&format!("        Box::new({}Client::new(client, root_url))\n", service.name));
-        buf.push_str("    }\n");
-        buf.push_str("}\n");
-
-        // Generate a single-item struct for this service's client
-        buf.push_str(&format!("\npub struct {}Client({}::HyperClient);\n", service.name, prost_twirp_mod));
-        
-        // Add constructor and get/set json setting for the client
-        buf.push_str(&format!("\n#[allow(dead_code)]\nimpl {}Client {{\n", service.name));
-        buf.push_str(&format!(
-            "    pub fn new(client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>, root_url: &str) -> {}Client {{\n",
-            service.name));
-        buf.push_str(&format!("        {}Client({}::HyperClient::new(client, root_url))\n",
-            service.name, prost_twirp_mod));
-        buf.push_str("    }\n");
-        buf.push_str("\n    pub fn json(&self) -> bool { self.0.json }\n");
-        buf.push_str("    pub fn set_json(&mut self, json: bool) { self.0.json = json; }\n");
-        buf.push_str("}\n");
-
-        // Generate the impl for the client
-        buf.push_str(&format!(
-            "\nimpl {}<{}::HyperResponseHead, {}::HyperClientError> for {}Client {{\n",
-            service.name, prost_twirp_mod, prost_twirp_mod, service.name));
-        for method in service.methods.iter() {
-            buf.push_str(&format!(
-                "    fn {}(&self, i: {}) -> Box<::futures::Future<Item={}::ServiceResponse<{}::HyperResponseHead, {}>, Error={}::HyperClientError>> {{\n",
-                method.name, method.input_type, prost_twirp_mod, prost_twirp_mod, method.output_type, prost_twirp_mod));
-            buf.push_str(&format!(
-                "        self.0.go(\"/twirp/{}.{}/{}\", i)\n", service.package, service.name, method.proto_name));
-            buf.push_str("    }\n");
+            buf.push_str(&format!("    {};\n", self.method_sig(method)));
         }
         buf.push_str("}\n");
     }
 
+    fn method_sig(&self, method: &Method) -> String {
+        format!("fn {}(&self, i: PTReq<{}>) -> PTRes<{}>",
+            method.name, method.input_type, method.output_type)
+    }
+
+    fn generate_main_impl(&self, service: &Service, buf: &mut String) {
+        buf.push_str(&format!(
+            "\n\
+            impl {0} {{\n    \
+                pub fn new_client(client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>, root_url: &str) -> Box<{0}> {{\n        \
+                    Box::new({0}Client({1}::HyperClient::new(client, root_url)))\n    \
+                }}\n\
+            }}\n",
+            service.name, self.prost_twirp_mod()));
+    }
+
+    fn generate_client_struct(&self, service: &Service, buf: &mut String) {
+        buf.push_str(&format!(
+            "\npub struct {}Client(pub {}::HyperClient);\n",
+            service.name, self.prost_twirp_mod()));
+    }
+
+    fn generate_client_impl(&self, service: &Service, buf: &mut String) {
+        buf.push_str(&format!("\nimpl {0} for {0}Client {{", service.name));
+        for method in service.methods.iter() {
+            buf.push_str(&format!(
+                "\n    {} {{\n        \
+                    self.0.go(\"/twirp/{}.{}/{}\", i)\n    \
+                }}\n", self.method_sig(method), service.package, service.name, method.proto_name));
+        }
+        buf.push_str("}\n");
+    }
+}
+
+impl ServiceGenerator for TwirpServiceGenerator {
+    fn generate(&mut self, service: Service, buf: &mut String) {
+        self.generate_type_aliases(buf);
+        self.generate_main_trait(&service, buf);
+        self.generate_main_impl(&service, buf);
+        self.generate_client_struct(&service, buf);
+        self.generate_client_impl(&service, buf);
+    }
+
     fn finalize(&mut self, buf: &mut String) {
         if self.embed_client {
-            buf.push_str("\n/// Embedded module from prost_twirp source\nmod prost_twirp {\n");
+            buf.push_str("\n/// Embedded module from prost_twirp source\n#[allow(dead_code)]\nmod prost_twirp {\n");
             for line in include_str!("service_run.rs").lines() {
                 buf.push_str(&format!("    {}\n", line));
             }

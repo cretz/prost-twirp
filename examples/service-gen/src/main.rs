@@ -28,11 +28,8 @@ fn main() {
         let service_client = service::Haberdasher::new_client(hyper_client, "http://localhost:8080");
         // Run the 5 like the other client
         let work = future::join_all((0..5).map(|_|
-            service_client.make_hat(service::Size { inches: 12 }).
-                and_then(|res| {
-                    let hat: service::Hat = res.rpc_response;
-                    Ok(println!("Made {:?}", hat))
-                })
+            service_client.make_hat(service::Size { inches: 12 }.into()).
+                and_then(|res| Ok(println!("Made {:?}", res.output)))
         ));
         core.run(work).unwrap();
     }
