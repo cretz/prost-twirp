@@ -16,8 +16,8 @@ impl TwirpServiceGenerator {
         self.type_aliases_added = true;
         buf.push_str(&format!(
             "\n\
-            type PTReq<I> = {0}::ServiceRequest<I>;\n\
-            type PTRes<O> = Box<::futures::Future<Item={0}::ServiceResponse<O>, Error={0}::ProstTwirpError>>;\n",
+            pub type PTReq<I> = {0}::ServiceRequest<I>;\n\
+            pub type PTRes<O> = Box<::futures::Future<Item={0}::ServiceResponse<O>, Error={0}::ProstTwirpError>>;\n",
             self.prost_twirp_mod()));
     }
 
@@ -44,6 +44,10 @@ impl TwirpServiceGenerator {
             impl {0} {{\n    \
                 pub fn new_client(client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>, root_url: &str) -> Box<{0}> {{\n        \
                     Box::new({0}Client({1}::HyperClient::new(client, root_url)))\n    \
+                }}\n    \
+                pub fn new_server<T: 'static + {0}>(v: T) -> Box<::hyper::server::Service<Request=::hyper::Request,\n            \
+                        Response=::hyper::Response, Error=::hyper::Error, Future=Box<::futures::Future<Item=::hyper::Response, Error=::hyper::Error>>>> {{\n        \
+                    Box::new({1}::HyperServer::new({0}Server(::std::sync::Arc::new(v))))\n    \
                 }}\n\
             }}\n",
             service.name, self.prost_twirp_mod()));
@@ -61,9 +65,42 @@ impl TwirpServiceGenerator {
             buf.push_str(&format!(
                 "\n    {} {{\n        \
                     self.0.go(\"/twirp/{}.{}/{}\", i)\n    \
-                }}\n", self.method_sig(method), service.package, service.name, method.proto_name));
+                }}\n", self.method_sig(method), service.package, service.proto_name, method.proto_name));
         }
         buf.push_str("}\n");
+    }
+
+    fn generate_server_struct(&self, service: &Service, buf: &mut String) {
+        buf.push_str(&format!(
+            "\npub struct {0}Server<T: 'static + {0}>(::std::sync::Arc<T>);\n",
+            service.name));
+    }
+
+    fn generate_server_impl(&self, service: &Service, buf: &mut String) {
+        buf.push_str(&format!(
+            "\n\
+            impl<T: 'static + {0}> {1}::HyperService for {0}Server<T> {{\n    \
+                fn handle(&self, req: {1}::ServiceRequest<Vec<u8>>) -> {1}::FutResp<Vec<u8>> {{\n        \
+                    use ::futures::Future;\n        \
+                    let static_service = self.0.clone();\n        \
+                    match (req.method.clone(), req.uri.path()) {{",
+            service.name, self.prost_twirp_mod()));
+        // Make match arms for each type
+        for method in service.methods.iter() {
+            buf.push_str(&format!(
+                "\n            \
+                (::hyper::Method::Post, \"/twirp/{}.{}/{}\") =>\n                \
+                    Box::new(::futures::future::result(req.to_proto()).and_then(move |v| static_service.{}(v)).and_then(|v| v.to_proto_raw())),",
+                service.package, service.proto_name, method.proto_name, method.name));
+        }
+        // Final 404 arm and end fn
+        buf.push_str(&format!(
+            "\n            \
+                        _ => Box::new(::futures::future::ok({0}::TwirpError::new(\"not_found\", \"Not found\").to_resp_raw(::hyper::StatusCode::NotFound)))\n        \
+                    }}\n    \
+                }}\n\
+            }}",
+            self.prost_twirp_mod()));
     }
 }
 
@@ -74,6 +111,8 @@ impl ServiceGenerator for TwirpServiceGenerator {
         self.generate_main_impl(&service, buf);
         self.generate_client_struct(&service, buf);
         self.generate_client_impl(&service, buf);
+        self.generate_server_struct(&service, buf);
+        self.generate_server_impl(&service, buf);
     }
 
     fn finalize(&mut self, buf: &mut String) {

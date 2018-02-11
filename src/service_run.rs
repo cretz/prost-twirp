@@ -8,6 +8,7 @@ use hyper::header::{ContentLength, ContentType};
 use hyper::server::Service;
 use prost::{DecodeError, EncodeError, Message};
 use serde_json;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ServiceRequest<T> {
@@ -317,17 +318,14 @@ impl HyperClient {
 }
 
 pub trait HyperService {
-    // Ug: https://github.com/tokio-rs/tokio-service/issues/9
-    fn static_self(&self) -> Box<'static + HyperService>;
-
     fn handle(&self, req: ServiceRequest<Vec<u8>>) -> FutResp<Vec<u8>>;
 }
 
-pub struct HyperServer<T> {
-    pub service: T
+pub struct HyperServer<T: 'static + HyperService> {
+    pub service: Arc<T>
 }
-impl<T> HyperServer<T> {
-    pub fn new(service: T) -> HyperServer<T> { HyperServer { service } }
+impl<T: 'static + HyperService> HyperServer<T> {
+    pub fn new(service: T) -> HyperServer<T> { HyperServer { service: Arc::new(service) } }
 }
 
 impl<T: 'static + HyperService> Service for HyperServer<T> {
@@ -342,9 +340,9 @@ impl<T: 'static + HyperService> Service for HyperServer<T> {
                 to_hyper_resp(StatusCode::MethodNotAllowed)))
         } else {
             // Ug: https://github.com/tokio-rs/tokio-service/issues/9
-            let static_self = self.service.static_self();
+            let service = self.service.clone();
             Box::new(ServiceRequest::from_hyper_raw(req).
-                and_then(move |v| static_self.handle(v)).
+                and_then(move |v| service.handle(v)).
                 map(|v| v.to_hyper_raw()).
                 or_else(|err| {
                     let (status, twirp_err) = match err.root_err() {

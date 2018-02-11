@@ -24,23 +24,25 @@ mod service {
 fn main() {
     let run_server = env::args().any(|s| s == "--server");
     let run_client = !run_server || env::args().any(|s| s == "--client");
-
     let (shutdown_send, shutdown_recv) = oneshot::channel();
 
     if run_server {
         let thread_res = thread::spawn(|| {
             println!("Starting server");
-            let addr = "127.0.0.1:8080".parse().unwrap();
-            let hyper_server = Http::new().bind(&addr, move || Ok(HyperServer::new(MyServer))).unwrap();
-            let _ = hyper_server.run_until(shutdown_recv.map_err(|_| ())).unwrap();
+            let addr = "0.0.0.0:8080".parse().unwrap();
+            let server = Http::new().bind(&addr, move || Ok(HyperServer::new(MyServer))).unwrap();
+            server.run_until(shutdown_recv.map_err(|_| ())).unwrap();
             println!("Server stopped");
         });
         // Wait a sec or forever depending on whether there's client code to run
-        if run_client { thread::sleep(Duration::from_millis(1000)); } else { thread_res.join(); }
+        if run_client {
+            thread::sleep(Duration::from_millis(1000));
+        } else {
+            if let Err(err) = thread_res.join() { println!("Server panicked: {:?}", err); }
+        }
     }
 
     if run_client {
-        println!("Starting client");
         let mut core = Core::new().unwrap();
         let hyper_client = Client::new(&core.handle());
         let prost_client = HyperClient::new(hyper_client, "http://localhost:8080");
@@ -61,8 +63,6 @@ fn main() {
 
 struct MyServer;
 impl HyperService for MyServer {
-    fn static_self(&self) -> Box<'static + HyperService> { Box::new(MyServer) }
-
     fn handle(&self, req: ServiceRequest<Vec<u8>>) -> FutResp<Vec<u8>> {
         match (req.method.clone(), req.uri.path()) {
             (Method::Post, "/twirp/twitch.twirp.example.Haberdasher/MakeHat") =>
