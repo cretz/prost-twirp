@@ -8,69 +8,93 @@ use hyper::header::{ContentLength, ContentType};
 use hyper::server::Service;
 use prost::{DecodeError, EncodeError, Message};
 use serde_json;
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct ServiceRequest<T> {
+    pub uri: Uri,
     pub method: Method,
     pub version: HttpVersion,
     pub headers: Headers,
     pub input: T,
 }
 
+pub type FutReq<T> = Box<Future<Item=ServiceRequest<T>, Error=ProstTwirpError>>;
+
 impl<T> ServiceRequest<T> {
-    pub fn new(input: T) -> ServiceRequest<T> { input.into() }
-    pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
-}
-
-impl<T: Message + Default + 'static> ServiceRequest<T> {
-    pub fn from_hyper_req(req: Request) -> Box<Future<Item=ServiceRequest<T>, Error=ProstTwirpError>> {
-        let method = req.method().clone();
-        let version = req.version();
-        let json = req.headers().get::<ContentType>() == Some(&ContentType::json());
-        let headers = req.headers().clone();
-        Box::new(req.body().concat2().map_err(ProstTwirpError::HyperError).and_then(move |body| {
-            if json {
-                panic!("TODO: JSON serialization");
-            } else {
-                match T::decode(body.to_vec()) {
-                    Ok(v) => Ok(ServiceRequest { method, version, headers, input: v }),
-                    Err(err) => Err(ProstTwirpError::AfterBodyError {
-                        body: body.to_vec(), method: Some(method), version, headers, status: None,
-                        err: Box::new(ProstTwirpError::ProstDecodeError(err))
-                    })
-                }
-            }
-        }))
-    }
-
-    pub fn to_hyper_req(&self, uri: Uri) -> Result<Request, ProstTwirpError> {
-        let mut req = Request::new(Method::Post, uri);
-        req.headers_mut().clone_from(&self.headers);
-        if self.json() {
-            panic!("TODO: JSON serialization");
-        } else {
-            let mut body = Vec::new();
-            if let Err(err) = self.input.encode(&mut body) {
-                return Err(ProstTwirpError::ProstEncodeError(err));
-            }
-            req.headers_mut().set(ContentLength(body.len() as u64));
-            req.set_body(body);
-        }
-        Ok(req)
-    }
-}
-
-impl<T> From<T> for ServiceRequest<T> {
-    fn from(input: T) -> ServiceRequest<T> {
+    pub fn new(input: T) -> ServiceRequest<T> {
         let mut headers = Headers::new();
         headers.set(ContentType("application/protobuf".parse().unwrap()));
         ServiceRequest {
+            uri: Default::default(),
             method: Method::Post,
             version: HttpVersion::default(),
             headers: headers,
             input
         }
+    }
+    
+    pub fn clone_with_input<U>(&self, input: U) -> ServiceRequest<U> {
+        ServiceRequest { uri: self.uri.clone(), method: self.method.clone(), version: self.version,
+            headers: self.headers.clone(), input }
+    }
+
+    pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
+}
+
+impl<T: Message + Default + 'static> From<T> for ServiceRequest<T> {
+    fn from(v: T) -> ServiceRequest<T> { ServiceRequest::new(v) }
+}
+
+impl ServiceRequest<Vec<u8>> {
+    pub fn from_hyper_raw(req: Request) -> FutReq<Vec<u8>> {
+        let uri = req.uri().clone();
+        let method = req.method().clone();
+        let version = req.version();
+        let headers = req.headers().clone();
+        Box::new(req.body().concat2().map_err(ProstTwirpError::HyperError).map(move |body| {
+            ServiceRequest { uri, method, version, headers, input: body.to_vec() }
+        }))
+    }
+
+    pub fn to_hyper_raw(&self) -> Request {
+        let mut req = Request::new(Method::Post, self.uri.clone());
+        req.headers_mut().clone_from(&self.headers);
+        req.headers_mut().set(ContentLength(self.input.len() as u64));
+        req.set_body(self.input.clone());
+        req
+    }
+
+    pub fn body_err(&self, err: ProstTwirpError) -> ProstTwirpError {
+        ProstTwirpError::AfterBodyError {
+            body: self.input.clone(), method: Some(self.method.clone()), version: self.version,
+            headers: self.headers.clone(), status: None, err: Box::new(err)
+        }
+    }
+
+    pub fn to_proto<T: Message + Default + 'static>(&self) -> Result<ServiceRequest<T>, ProstTwirpError> {
+        match T::decode(&self.input) {
+            Ok(v) => Ok(self.clone_with_input(v)),
+            Err(err) => Err(self.body_err(ProstTwirpError::ProstDecodeError(err)))
+        }
+    }
+}
+
+impl<T: Message + Default + 'static> ServiceRequest<T> {
+    pub fn to_proto_raw(&self) -> Result<ServiceRequest<Vec<u8>>, ProstTwirpError> {
+        let mut body = Vec::new();
+        if let Err(err) = self.input.encode(&mut body) {
+            Err(ProstTwirpError::ProstEncodeError(err))
+        } else {
+            Ok(self.clone_with_input(body))
+        }
+    }
+
+    pub fn from_hyper_proto(req: Request) -> FutReq<T> {
+        Box::new(ServiceRequest::from_hyper_raw(req).and_then(|v| v.to_proto()))
+    }
+
+    pub fn to_hyper_proto(&self) -> Result<Request, ProstTwirpError> {
+        self.to_proto_raw().map(|v| v.to_hyper_raw())
     }
 }
 
@@ -82,58 +106,10 @@ pub struct ServiceResponse<T> {
     pub output: T,
 }
 
+pub type FutResp<T> = Box<Future<Item=ServiceResponse<T>, Error=ProstTwirpError>>;
+
 impl<T> ServiceResponse<T> {
-    pub fn new(input: T) -> ServiceResponse<T> { input.into() }
-    pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
-}
-
-impl<T: Message + Default + 'static> ServiceResponse<T> {
-    pub fn from_hyper_resp(resp: Response) -> Box<Future<Item=ServiceResponse<T>, Error=ProstTwirpError>> {
-        let version = resp.version();
-        let headers = resp.headers().clone();
-        let status = resp.status();
-        Box::new(resp.body().concat2().map_err(ProstTwirpError::HyperError).and_then(move |body| {
-            if status.is_success() {
-                match T::decode(body.to_vec()) {
-                    Ok(v) => Ok(ServiceResponse { version, headers, status, output: v }),
-                    Err(err) => Err(ProstTwirpError::AfterBodyError {
-                        body: body.to_vec(), method: None, version, headers, status: Some(status),
-                        err: Box::new(ProstTwirpError::ProstDecodeError(err))
-                    })
-                }
-            } else {
-                match TwirpError::from_json_bytes(body.to_vec().as_slice()) {
-                    Ok(err) => Err(ProstTwirpError::AfterBodyError {
-                        body: body.to_vec(), method: None, version, headers, status: Some(status),
-                        err: Box::new(ProstTwirpError::TwirpError(err))
-                    }),
-                    Err(err) => Err(ProstTwirpError::AfterBodyError {
-                        body: body.to_vec(), method: None, version, headers, status: Some(status),
-                        err: Box::new(ProstTwirpError::JsonDecodeError(err))
-                    })
-                }
-            }
-        }))
-    }
-
-    pub fn to_hyper_resp(&self) -> Result<Response, ProstTwirpError> {
-        let mut resp = Response::new().with_status(self.status).with_headers(self.headers.clone());
-        if self.json() {
-            panic!("TODO: JSON serialization");
-        } else {
-            let mut body = Vec::new();
-            if let Err(err) = self.output.encode(&mut body) {
-                return Err(ProstTwirpError::ProstEncodeError(err));
-            }
-            resp.headers_mut().set(ContentLength(body.len() as u64));
-            resp.set_body(body);
-        }
-        Ok(resp)
-    }
-}
-
-impl<T> From<T> for ServiceResponse<T> {
-    fn from(output: T) -> ServiceResponse<T> {
+    pub fn new(output: T) -> ServiceResponse<T> { 
         let mut headers = Headers::new();
         headers.set(ContentType("application/protobuf".parse().unwrap()));
         ServiceResponse {
@@ -142,6 +118,75 @@ impl<T> From<T> for ServiceResponse<T> {
             status: StatusCode::Ok,
             output
         }
+    }
+    
+    pub fn clone_with_output<U>(&self, output: U) -> ServiceResponse<U> {
+        ServiceResponse { version: self.version, headers: self.headers.clone(), status: self.status, output }
+    }
+
+    pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
+}
+
+impl<T: Message + Default + 'static> From<T> for ServiceResponse<T> {
+    fn from(v: T) -> ServiceResponse<T> { ServiceResponse::new(v) }
+}
+
+impl ServiceResponse<Vec<u8>> {
+    pub fn from_hyper_raw(resp: Response) -> FutResp<Vec<u8>> {
+        let version = resp.version();
+        let headers = resp.headers().clone();
+        let status = resp.status();
+        Box::new(resp.body().concat2().map_err(ProstTwirpError::HyperError).map(move |body| {
+            ServiceResponse { version, headers, status, output: body.to_vec() }
+        }))
+    }
+
+    pub fn to_hyper_raw(&self) -> Response {
+        Response::new().
+            with_status(self.status).
+            with_headers(self.headers.clone()).
+            with_header(ContentLength(self.output.len() as u64)).
+            with_body(self.output.clone())
+    }
+
+    pub fn body_err(&self, err: ProstTwirpError) -> ProstTwirpError {
+        ProstTwirpError::AfterBodyError {
+            body: self.output.clone(), method: None, version: self.version,
+            headers: self.headers.clone(), status: Some(self.status), err: Box::new(err)
+        }
+    }
+
+    pub fn to_proto<T: Message + Default + 'static>(&self) -> Result<ServiceResponse<T>, ProstTwirpError> {
+        if self.status.is_success() {
+            match T::decode(&self.output) {
+                Ok(v) => Ok(self.clone_with_output(v)),
+                Err(err) => Err(self.body_err(ProstTwirpError::ProstDecodeError(err)))
+            }
+        } else {
+            match TwirpError::from_json_bytes(&self.output) {
+                Ok(err) => Err(self.body_err(ProstTwirpError::TwirpError(err))),
+                Err(err) => Err(self.body_err(ProstTwirpError::JsonDecodeError(err)))
+            }
+        }
+    }
+}
+
+impl<T: Message + Default + 'static> ServiceResponse<T> {
+    pub fn to_proto_raw(&self) -> Result<ServiceResponse<Vec<u8>>, ProstTwirpError> {
+        let mut body = Vec::new();
+        if let Err(err) = self.output.encode(&mut body) {
+            Err(ProstTwirpError::ProstEncodeError(err))
+        } else {
+            Ok(self.clone_with_output(body))
+        }
+    }
+
+    pub fn from_hyper_proto(resp: Response) -> FutResp<T> {
+        Box::new(ServiceResponse::from_hyper_raw(resp).and_then(|v| v.to_proto()))
+    }
+
+    pub fn to_hyper_proto(&self) -> Result<Response, ProstTwirpError> {
+        self.to_proto_raw().map(|v| v.to_hyper_raw())
     }
 }
 
@@ -155,6 +200,28 @@ pub struct TwirpError {
 impl TwirpError {
     pub fn new(error_type: &str, msg: &str) -> TwirpError {
         TwirpError { error_type: error_type.to_string(), msg: msg.to_string(), meta: None }
+    }
+
+    pub fn to_resp_raw(&self, status: StatusCode) -> ServiceResponse<Vec<u8>> {
+        let output = self.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
+        let mut headers = Headers::new();
+        headers.set(ContentType::json());
+        headers.set(ContentLength(output.len() as u64));
+        ServiceResponse {
+            version: HttpVersion::default(),
+            headers: headers,
+            status: status,
+            output
+        }
+    }
+
+    pub fn to_hyper_resp(&self, status: StatusCode) -> Response {
+        let body = self.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
+        Response::new().
+            with_status(status).
+            with_header(ContentType::json()).
+            with_header(ContentLength(body.len() as u64)).
+            with_body(body)
     }
 
     pub fn from_json(json: serde_json::Value) -> TwirpError {
@@ -228,7 +295,7 @@ impl HyperClient {
         }
     }
 
-    pub fn go<I, O>(&self, path: &str, req: ServiceRequest<I>) -> Box<Future<Item=ServiceResponse<O>, Error=ProstTwirpError>>
+    pub fn go<I, O>(&self, path: &str, req: ServiceRequest<I>) -> FutResp<O>
             where I: Message + Default + 'static, O: Message + Default + 'static {
         // Build the URI
         let uri = match format!("{}/{}", self.root_url, path.trim_left_matches('/')).parse() {
@@ -236,48 +303,34 @@ impl HyperClient {
             Ok(v) => v,
         };
         // Build the request
-        let hyper_req = match req.to_hyper_req(uri) {
+        let mut hyper_req = match req.to_hyper_proto() {
             Err(err) => return Box::new(future::err(err)),
             Ok(v) => v
         };
+        hyper_req.set_uri(uri);
 
         // Run the request and map the response
         Box::new(self.client.request(hyper_req).
             map_err(ProstTwirpError::HyperError).
-            and_then(ServiceResponse::from_hyper_resp))
+            and_then(ServiceResponse::from_hyper_proto))
     }
 }
 
-type HyperCallback = Box<Fn(Request) -> Box<Future<Item=Response, Error=ProstTwirpError>> + 'static>;
-// type HyperCallback = 
+pub trait HyperService {
+    // Ug: https://github.com/tokio-rs/tokio-service/issues/9
+    fn static_self(&self) -> Box<'static + HyperService>;
 
-pub struct HyperServer {
-    json: bool,
-    // Key is /<package>.<Service>/<Method>
-    methods: HashMap<String, HyperCallback>,
+    fn handle(&self, req: ServiceRequest<Vec<u8>>) -> FutResp<Vec<u8>>;
 }
 
-impl HyperServer {
-    pub fn add_method<I, O, F>(&mut self, path: &str, cb: &'static F)
-            where I: Message + Default + 'static,
-                  O: Message + Default + 'static,
-                  F: Fn(ServiceRequest<I>) -> Box<Future<Item=ServiceResponse<O>, Error=ProstTwirpError>> + 'static {
-        self.methods.insert(path.to_string(), Box::new(move |req| {
-            Box::new(ServiceRequest::from_hyper_req(req).and_then(cb).and_then(|v| v.to_hyper_resp()))
-        }));
-    }
-
-    pub fn err_resp(&self, status: StatusCode, err: TwirpError) -> Response {
-        let body = err.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
-        Response::new().
-            with_status(status).
-            with_header(ContentType::json()).
-            with_header(ContentLength(body.len() as u64)).
-            with_body(body)
-    }
+pub struct HyperServer<T> {
+    pub service: T
+}
+impl<T> HyperServer<T> {
+    pub fn new(service: T) -> HyperServer<T> { HyperServer { service } }
 }
 
-impl Service for HyperServer {
+impl<T: 'static + HyperService> Service for HyperServer<T> {
     type Request = Request;
     type Response = Response;
     type Error = hyper::Error;
@@ -285,25 +338,21 @@ impl Service for HyperServer {
 
     fn call(&self, req: Request) -> Self::Future {
         if req.method() != &Method::Post {
-            Box::new(future::ok(self.err_resp(
-                StatusCode::MethodNotAllowed, TwirpError::new("bad_method", "Must be 'POST'"))))
+            Box::new(future::ok(TwirpError::new("bad_method", "Must be 'POST'").
+                to_hyper_resp(StatusCode::MethodNotAllowed)))
         } else {
-            match self.methods.get(req.path()) {
-                None => Box::new(future::ok(self.err_resp(
-                    StatusCode::NotFound, TwirpError::new("not_found", "Not found")))),
-                Some(cb) => Box::new(cb(req).or_else(|err| {
+            // Ug: https://github.com/tokio-rs/tokio-service/issues/9
+            let static_self = self.service.static_self();
+            Box::new(ServiceRequest::from_hyper_raw(req).
+                and_then(move |v| static_self.handle(v)).
+                map(|v| v.to_hyper_raw()).
+                or_else(|err| {
                     let (status, twirp_err) = match err.root_err() {
                         // TODO
                         _ => (StatusCode::InternalServerError, TwirpError::new("internal_err", "Internal Error"))
                     };
-                    let body = twirp_err.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
-                    Ok(Response::new().
-                        with_status(status).
-                        with_header(ContentType::json()).
-                        with_header(ContentLength(body.len() as u64)).
-                        with_body(body))
+                    Ok(twirp_err.to_hyper_resp(status))
                 }))
-            }
         }
     }
 }
