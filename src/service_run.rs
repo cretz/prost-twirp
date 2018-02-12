@@ -6,7 +6,9 @@ use hyper::client::HttpConnector;
 use hyper::header::{ContentLength, ContentType};
 use hyper::server::Service;
 use prost::{DecodeError, EncodeError, Message};
+use serde::{Deserialize, Serialize};
 use serde_json;
+use serde_json::{Deserializer, Serializer};
 use std::sync::Arc;
 
 pub type FutReq<T> = Box<Future<Item=ServiceRequest<T>, Error=ProstTwirpError>>;
@@ -273,7 +275,7 @@ impl TwirpError {
             with_body(body)
     }
 
-    // TODO: use serde serializer
+    /// Create error from Serde JSON value
     pub fn from_json(json: serde_json::Value) -> TwirpError {
         let error_type = json["error_type"].as_str();
         TwirpError {
@@ -284,12 +286,12 @@ impl TwirpError {
         }
     }
 
-    // TODO: use serde serializer
+    /// Create error from byte array
     pub fn from_json_bytes(json: &[u8]) -> serde_json::Result<TwirpError> {
         serde_json::from_slice(json).map(&TwirpError::from_json)
     }
 
-    // TODO: use serde serializer
+    /// Create Serde JSON value from error
     pub fn to_json(&self) -> serde_json::Value {
         let mut props = serde_json::map::Map::new();
         props.insert("error_type".to_string(), serde_json::Value::String(self.error_type.clone()));
@@ -298,7 +300,7 @@ impl TwirpError {
         serde_json::Value::Object(props)
     }
 
-    // TODO: use serde serializer
+    /// Create byte array from error
     pub fn to_json_bytes(&self) -> serde_json::Result<Vec<u8>> {
         serde_json::to_vec(&self.to_json())
     }

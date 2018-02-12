@@ -6,3 +6,5 @@
   dependency.
 * [service-gen-no-runtime](service-gen-no-runtime) - Example showing how to generate service code along with runtime
   code and not have `prost-twirp` as a dependency.
+* json - TODO: example showing JSON serialization/deserialization
+* errors - TODO: example showing error handling

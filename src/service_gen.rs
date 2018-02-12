@@ -3,12 +3,24 @@ use prost_build::{Method, Service, ServiceGenerator};
 #[derive(Default)]
 pub struct TwirpServiceGenerator {
     pub embed_client: bool,
+    type_aliases_generated: bool,
 }
 
 impl TwirpServiceGenerator {
     pub fn new() -> TwirpServiceGenerator { Default::default() }
 
     fn prost_twirp_mod(&self) -> &str { if self.embed_client { "prost_twirp" } else { "::prost_twirp" } }
+
+    fn generate_type_aliases(&mut self, buf: &mut String) {
+        if !self.type_aliases_generated {
+            self.type_aliases_generated = true;
+            buf.push_str(&format!(
+                "\n\
+                pub type PTReq<I> = {0}::PTReq<I>;\n\
+                pub type PTRes<O> = {0}::PTRes<O>;\n",
+                self.prost_twirp_mod()));
+        }
+    }
 
     fn generate_main_trait(&self, service: &Service, buf: &mut String) {
         buf.push_str("\n");
@@ -69,7 +81,7 @@ impl TwirpServiceGenerator {
         buf.push_str(&format!(
             "\n\
             impl<T: 'static + {0}> {1}::HyperService for {0}Server<T> {{\n    \
-                fn handle(&self, req: {1}::ServiceRequest<Vec<u8>>) -> {1}::FutResp<Vec<u8>> {{\n        \
+                fn handle(&self, req: {1}::ServiceRequest<Vec<u8>>) -> {1}::PTRes<Vec<u8>> {{\n        \
                     use ::futures::Future;\n        \
                     let static_service = self.0.clone();\n        \
                     match (req.method.clone(), req.uri.path()) {{",
@@ -95,6 +107,7 @@ impl TwirpServiceGenerator {
 
 impl ServiceGenerator for TwirpServiceGenerator {
     fn generate(&mut self, service: Service, buf: &mut String) {
+        self.generate_type_aliases(buf);
         self.generate_main_trait(&service, buf);
         self.generate_main_impl(&service, buf);
         self.generate_client_struct(&service, buf);
