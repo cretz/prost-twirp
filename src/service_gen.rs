@@ -3,23 +3,12 @@ use prost_build::{Method, Service, ServiceGenerator};
 #[derive(Default)]
 pub struct TwirpServiceGenerator {
     pub embed_client: bool,
-    type_aliases_added: bool,
 }
 
 impl TwirpServiceGenerator {
     pub fn new() -> TwirpServiceGenerator { Default::default() }
 
     fn prost_twirp_mod(&self) -> &str { if self.embed_client { "prost_twirp" } else { "::prost_twirp" } }
-
-    fn generate_type_aliases(&mut self, buf: &mut String) {
-        if self.type_aliases_added { return; }
-        self.type_aliases_added = true;
-        buf.push_str(&format!(
-            "\n\
-            pub type PTReq<I> = {0}::ServiceRequest<I>;\n\
-            pub type PTRes<O> = Box<::futures::Future<Item={0}::ServiceResponse<O>, Error={0}::ProstTwirpError>>;\n",
-            self.prost_twirp_mod()));
-    }
 
     fn generate_main_trait(&self, service: &Service, buf: &mut String) {
         buf.push_str("\n");
@@ -34,8 +23,8 @@ impl TwirpServiceGenerator {
     }
 
     fn method_sig(&self, method: &Method) -> String {
-        format!("fn {}(&self, i: PTReq<{}>) -> PTRes<{}>",
-            method.name, method.input_type, method.output_type)
+        format!("fn {0}(&self, i: {1}::PTReq<{2}>) -> {1}::PTRes<{3}>",
+            method.name, self.prost_twirp_mod(), method.input_type, method.output_type)
     }
 
     fn generate_main_impl(&self, service: &Service, buf: &mut String) {
@@ -106,7 +95,6 @@ impl TwirpServiceGenerator {
 
 impl ServiceGenerator for TwirpServiceGenerator {
     fn generate(&mut self, service: Service, buf: &mut String) {
-        self.generate_type_aliases(buf);
         self.generate_main_trait(&service, buf);
         self.generate_main_impl(&service, buf);
         self.generate_client_struct(&service, buf);

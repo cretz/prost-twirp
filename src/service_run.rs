@@ -1,4 +1,3 @@
-
 use futures::{Future, Stream};
 use futures::future;
 use hyper;
@@ -10,18 +9,37 @@ use prost::{DecodeError, EncodeError, Message};
 use serde_json;
 use std::sync::Arc;
 
+pub type FutReq<T> = Box<Future<Item=ServiceRequest<T>, Error=ProstTwirpError>>;
+
+/// The type of every service request 
+pub type PTReq<I> = ServiceRequest<I>;
+
+/// The type of every service response
+pub type PTRes<O> = Box<Future<Item=ServiceResponse<O>, Error=ProstTwirpError>>;
+
+/// A request with HTTP info and the serialized input object
 #[derive(Debug)]
 pub struct ServiceRequest<T> {
+    /// The URI of the original request
+    /// 
+    /// When using a client, this will be overridden with the proper URI. It is only valuable for servers.
     pub uri: Uri,
+    /// The request method; should always be Post
     pub method: Method,
+    /// The HTTP version, rarely changed from the default
     pub version: HttpVersion,
+    /// The set of headers
+    ///
+    /// Should always at least have `Content-Type`. Clients will override `Content-Length` on serialization.
     pub headers: Headers,
+    // The serialized request object
     pub input: T,
 }
 
-pub type FutReq<T> = Box<Future<Item=ServiceRequest<T>, Error=ProstTwirpError>>;
-
 impl<T> ServiceRequest<T> {
+    /// Create new service request with the given input object
+    /// 
+    /// This automatically sets the `Content-Type` header as `application/protobuf`.
     pub fn new(input: T) -> ServiceRequest<T> {
         let mut headers = Headers::new();
         headers.set(ContentType("application/protobuf".parse().unwrap()));
@@ -34,11 +52,13 @@ impl<T> ServiceRequest<T> {
         }
     }
     
+    /// Copy this request with a different input value
     pub fn clone_with_input<U>(&self, input: U) -> ServiceRequest<U> {
         ServiceRequest { uri: self.uri.clone(), method: self.method.clone(), version: self.version,
             headers: self.headers.clone(), input }
     }
 
+    /// Whether the content type header is for JSON
     pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
 }
 
@@ -47,6 +67,7 @@ impl<T: Message + Default + 'static> From<T> for ServiceRequest<T> {
 }
 
 impl ServiceRequest<Vec<u8>> {
+    /// Turn a hyper request to a boxed future of a byte-array service request
     pub fn from_hyper_raw(req: Request) -> FutReq<Vec<u8>> {
         let uri = req.uri().clone();
         let method = req.method().clone();
@@ -57,6 +78,7 @@ impl ServiceRequest<Vec<u8>> {
         }))
     }
 
+    /// Turn a byte-array service request into a hyper request
     pub fn to_hyper_raw(&self) -> Request {
         let mut req = Request::new(Method::Post, self.uri.clone());
         req.headers_mut().clone_from(&self.headers);
@@ -65,6 +87,7 @@ impl ServiceRequest<Vec<u8>> {
         req
     }
 
+    /// Turn a byte-array service request into a `AfterBodyError`-wrapped version of the given error
     pub fn body_err(&self, err: ProstTwirpError) -> ProstTwirpError {
         ProstTwirpError::AfterBodyError {
             body: self.input.clone(), method: Some(self.method.clone()), version: self.version,
@@ -72,6 +95,7 @@ impl ServiceRequest<Vec<u8>> {
         }
     }
 
+    /// Serialize the byte-array service request into a protobuf service request
     pub fn to_proto<T: Message + Default + 'static>(&self) -> Result<ServiceRequest<T>, ProstTwirpError> {
         match T::decode(&self.input) {
             Ok(v) => Ok(self.clone_with_input(v)),
@@ -81,6 +105,7 @@ impl ServiceRequest<Vec<u8>> {
 }
 
 impl<T: Message + Default + 'static> ServiceRequest<T> {
+    /// Turn a protobuf service request into a byte-array service request
     pub fn to_proto_raw(&self) -> Result<ServiceRequest<Vec<u8>>, ProstTwirpError> {
         let mut body = Vec::new();
         if let Err(err) = self.input.encode(&mut body) {
@@ -90,26 +115,36 @@ impl<T: Message + Default + 'static> ServiceRequest<T> {
         }
     }
 
+    /// Turn a hyper request into a protobuf service request
     pub fn from_hyper_proto(req: Request) -> FutReq<T> {
         Box::new(ServiceRequest::from_hyper_raw(req).and_then(|v| v.to_proto()))
     }
 
+    /// Turn a protobuf service request into a hyper request
     pub fn to_hyper_proto(&self) -> Result<Request, ProstTwirpError> {
         self.to_proto_raw().map(|v| v.to_hyper_raw())
     }
 }
 
+/// A response with HTTP info and a serialized output object
 #[derive(Debug)]
 pub struct ServiceResponse<T> {
+    /// The HTTP version
     pub version: HttpVersion,
+    /// The set of headers
+    ///
+    /// Should always at least have `Content-Type`. Servers will override `Content-Length` on serialization.
     pub headers: Headers,
+    /// The status code
     pub status: StatusCode,
+    /// The serialized output object
     pub output: T,
 }
 
-pub type FutResp<T> = Box<Future<Item=ServiceResponse<T>, Error=ProstTwirpError>>;
-
 impl<T> ServiceResponse<T> {
+    /// Create new service request with the given input object
+    /// 
+    /// This automatically sets the `Content-Type` header as `application/protobuf`.
     pub fn new(output: T) -> ServiceResponse<T> { 
         let mut headers = Headers::new();
         headers.set(ContentType("application/protobuf".parse().unwrap()));
@@ -121,10 +156,12 @@ impl<T> ServiceResponse<T> {
         }
     }
     
+    /// Copy this response with a different output value
     pub fn clone_with_output<U>(&self, output: U) -> ServiceResponse<U> {
         ServiceResponse { version: self.version, headers: self.headers.clone(), status: self.status, output }
     }
 
+    /// Whether the content type header is for JSON
     pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
 }
 
@@ -133,7 +170,8 @@ impl<T: Message + Default + 'static> From<T> for ServiceResponse<T> {
 }
 
 impl ServiceResponse<Vec<u8>> {
-    pub fn from_hyper_raw(resp: Response) -> FutResp<Vec<u8>> {
+    /// Turn a hyper response to a boxed future of a byte-array service response
+    pub fn from_hyper_raw(resp: Response) -> PTRes<Vec<u8>> {
         let version = resp.version();
         let headers = resp.headers().clone();
         let status = resp.status();
@@ -142,6 +180,7 @@ impl ServiceResponse<Vec<u8>> {
         }))
     }
 
+    /// Turn a byte-array service response into a hyper response
     pub fn to_hyper_raw(&self) -> Response {
         Response::new().
             with_status(self.status).
@@ -150,6 +189,7 @@ impl ServiceResponse<Vec<u8>> {
             with_body(self.output.clone())
     }
 
+    /// Turn a byte-array service response into a `AfterBodyError`-wrapped version of the given error
     pub fn body_err(&self, err: ProstTwirpError) -> ProstTwirpError {
         ProstTwirpError::AfterBodyError {
             body: self.output.clone(), method: None, version: self.version,
@@ -157,6 +197,7 @@ impl ServiceResponse<Vec<u8>> {
         }
     }
 
+    /// Serialize the byte-array service response into a protobuf service response
     pub fn to_proto<T: Message + Default + 'static>(&self) -> Result<ServiceResponse<T>, ProstTwirpError> {
         if self.status.is_success() {
             match T::decode(&self.output) {
@@ -173,6 +214,7 @@ impl ServiceResponse<Vec<u8>> {
 }
 
 impl<T: Message + Default + 'static> ServiceResponse<T> {
+    /// Turn a protobuf service response into a byte-array service response
     pub fn to_proto_raw(&self) -> Result<ServiceResponse<Vec<u8>>, ProstTwirpError> {
         let mut body = Vec::new();
         if let Err(err) = self.output.encode(&mut body) {
@@ -182,15 +224,18 @@ impl<T: Message + Default + 'static> ServiceResponse<T> {
         }
     }
 
-    pub fn from_hyper_proto(resp: Response) -> FutResp<T> {
+    /// Turn a hyper response into a protobuf service response
+    pub fn from_hyper_proto(resp: Response) -> PTRes<T> {
         Box::new(ServiceResponse::from_hyper_raw(resp).and_then(|v| v.to_proto()))
     }
 
+    /// Turn a protobuf service response into a hyper response
     pub fn to_hyper_proto(&self) -> Result<Response, ProstTwirpError> {
         self.to_proto_raw().map(|v| v.to_hyper_raw())
     }
 }
 
+/// A JSON-serializable Twirp error
 #[derive(Debug)]
 pub struct TwirpError {
     pub error_type: String,
@@ -199,10 +244,12 @@ pub struct TwirpError {
 }
 
 impl TwirpError {
+    /// Create a Twirp error with no meta
     pub fn new(error_type: &str, msg: &str) -> TwirpError {
         TwirpError { error_type: error_type.to_string(), msg: msg.to_string(), meta: None }
     }
 
+    /// Create a byte-array service response for this error and the given status code
     pub fn to_resp_raw(&self, status: StatusCode) -> ServiceResponse<Vec<u8>> {
         let output = self.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
         let mut headers = Headers::new();
@@ -216,6 +263,7 @@ impl TwirpError {
         }
     }
 
+    /// Create a hyper response for this error and the given status code
     pub fn to_hyper_resp(&self, status: StatusCode) -> Response {
         let body = self.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
         Response::new().
@@ -225,6 +273,7 @@ impl TwirpError {
             with_body(body)
     }
 
+    // TODO: use serde serializer
     pub fn from_json(json: serde_json::Value) -> TwirpError {
         let error_type = json["error_type"].as_str();
         TwirpError {
@@ -235,10 +284,12 @@ impl TwirpError {
         }
     }
 
+    // TODO: use serde serializer
     pub fn from_json_bytes(json: &[u8]) -> serde_json::Result<TwirpError> {
         serde_json::from_slice(json).map(&TwirpError::from_json)
     }
 
+    // TODO: use serde serializer
     pub fn to_json(&self) -> serde_json::Value {
         let mut props = serde_json::map::Map::new();
         props.insert("error_type".to_string(), serde_json::Value::String(self.error_type.clone()));
@@ -247,31 +298,44 @@ impl TwirpError {
         serde_json::Value::Object(props)
     }
 
+    // TODO: use serde serializer
     pub fn to_json_bytes(&self) -> serde_json::Result<Vec<u8>> {
         serde_json::to_vec(&self.to_json())
     }
 }
 
+/// An error that can occur during a call to a Twirp service
 #[derive(Debug)]
 pub enum ProstTwirpError {
+    /// A standard Twirp error with a type, message, and some metadata
     TwirpError(TwirpError),
+    /// An error when trying to decode JSON into an error or object
     JsonDecodeError(serde_json::Error),
+    /// An error when trying to encode a protobuf object
     ProstEncodeError(EncodeError),
+    /// An error when trying to decode a protobuf object
     ProstDecodeError(DecodeError),
+    /// A generic hyper error
     HyperError(hyper::Error),
+    /// A wrapper for any of the other `ProstTwirpError`s that also includes request/response info
     AfterBodyError {
+        /// The request or response's raw body before the error happened
         body: Vec<u8>,
-        /// Only present for server errors
+        /// The request method, only present for server errors
         method: Option<Method>,
+        /// The request or response's HTTP version
         version: HttpVersion,
+        /// The request or response's headers
         headers: Headers,
-        // Only present for client errors
+        /// The response status, only present for client errors
         status: Option<StatusCode>,
+        /// The underlying error
         err: Box<ProstTwirpError>,
     }
 }
 
 impl ProstTwirpError {
+    /// This same error, or the underlying error if it is an `AfterBodyError`
     pub fn root_err(self) -> ProstTwirpError {
         match self {
             ProstTwirpError::AfterBodyError { err, .. } => err.root_err(),
@@ -280,14 +344,19 @@ impl ProstTwirpError {
     }
 }
 
+/// A wrapper for a hyper client
 #[derive(Debug)]
 pub struct HyperClient {
+    /// The hyper client
     pub client: Client<HttpConnector, Body>,
+    /// The root URL without any path attached
     pub root_url: String,
+    /// True if this should use JSON instead of protobuf
     pub json: bool,
 }
 
 impl HyperClient {
+    /// Create a new client wrapper for the given client and root using protobuf
     pub fn new(client: Client<HttpConnector, Body>, root_url: &str) -> HyperClient {
         HyperClient {
             client,
@@ -296,7 +365,8 @@ impl HyperClient {
         }
     }
 
-    pub fn go<I, O>(&self, path: &str, req: ServiceRequest<I>) -> FutResp<O>
+    /// Invoke the given request for the given path and return a boxed future result
+    pub fn go<I, O>(&self, path: &str, req: ServiceRequest<I>) -> PTRes<O>
             where I: Message + Default + 'static, O: Message + Default + 'static {
         // Build the URI
         let uri = match format!("{}/{}", self.root_url, path.trim_left_matches('/')).parse() {
@@ -309,7 +379,6 @@ impl HyperClient {
             Ok(v) => v
         };
         hyper_req.set_uri(uri);
-
         // Run the request and map the response
         Box::new(self.client.request(hyper_req).
             map_err(ProstTwirpError::HyperError).
@@ -317,14 +386,22 @@ impl HyperClient {
     }
 }
 
+/// Service for taking a raw service request and returning a boxed future of a raw service response
 pub trait HyperService {
-    fn handle(&self, req: ServiceRequest<Vec<u8>>) -> FutResp<Vec<u8>>;
+    /// Accept a raw service request and return a boxed future of a raw service response
+    fn handle(&self, req: ServiceRequest<Vec<u8>>) -> PTRes<Vec<u8>>;
 }
 
+/// A wrapper for a `HyperService` trait that keeps a `Arc` version of the service
 pub struct HyperServer<T: 'static + HyperService> {
+    /// The `Arc` version of the service
+    /// 
+    /// Needed because of [hyper Service lifetimes](https://github.com/tokio-rs/tokio-service/issues/9)
     pub service: Arc<T>
 }
+
 impl<T: 'static + HyperService> HyperServer<T> {
+    /// Create a new service wrapper for the given impl
     pub fn new(service: T) -> HyperServer<T> { HyperServer { service: Arc::new(service) } }
 }
 
