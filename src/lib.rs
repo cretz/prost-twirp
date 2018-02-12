@@ -7,7 +7,6 @@
 extern crate futures;
 extern crate hyper;
 extern crate prost;
-extern crate serde;
 extern crate serde_json;
 
 mod service_run;

@@ -6,9 +6,7 @@ use hyper::client::HttpConnector;
 use hyper::header::{ContentLength, ContentType};
 use hyper::server::Service;
 use prost::{DecodeError, EncodeError, Message};
-use serde::{Deserialize, Serialize};
 use serde_json;
-use serde_json::{Deserializer, Serializer};
 use std::sync::Arc;
 
 pub type FutReq<T> = Box<Future<Item=ServiceRequest<T>, Error=ProstTwirpError>>;
@@ -59,9 +57,6 @@ impl<T> ServiceRequest<T> {
         ServiceRequest { uri: self.uri.clone(), method: self.method.clone(), version: self.version,
             headers: self.headers.clone(), input }
     }
-
-    /// Whether the content type header is for JSON
-    pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
 }
 
 impl<T: Message + Default + 'static> From<T> for ServiceRequest<T> {
@@ -162,9 +157,6 @@ impl<T> ServiceResponse<T> {
     pub fn clone_with_output<U>(&self, output: U) -> ServiceResponse<U> {
         ServiceResponse { version: self.version, headers: self.headers.clone(), status: self.status, output }
     }
-
-    /// Whether the content type header is for JSON
-    pub fn json(&self) -> bool { self.headers.get::<ContentType>() == Some(&ContentType::json()) }
 }
 
 impl<T: Message + Default + 'static> From<T> for ServiceResponse<T> {
@@ -207,7 +199,7 @@ impl ServiceResponse<Vec<u8>> {
                 Err(err) => Err(self.body_err(ProstTwirpError::ProstDecodeError(err)))
             }
         } else {
-            match TwirpError::from_json_bytes(&self.output) {
+            match TwirpError::from_json_bytes(self.status, &self.output) {
                 Ok(err) => Err(self.body_err(ProstTwirpError::TwirpError(err))),
                 Err(err) => Err(self.body_err(ProstTwirpError::JsonDecodeError(err)))
             }
@@ -240,6 +232,7 @@ impl<T: Message + Default + 'static> ServiceResponse<T> {
 /// A JSON-serializable Twirp error
 #[derive(Debug)]
 pub struct TwirpError {
+    pub status: StatusCode,
     pub error_type: String,
     pub msg: String,
     pub meta: Option<serde_json::Value>,
@@ -247,12 +240,17 @@ pub struct TwirpError {
 
 impl TwirpError {
     /// Create a Twirp error with no meta
-    pub fn new(error_type: &str, msg: &str) -> TwirpError {
-        TwirpError { error_type: error_type.to_string(), msg: msg.to_string(), meta: None }
+    pub fn new(status: StatusCode, error_type: &str, msg: &str) -> TwirpError {
+        TwirpError::new_meta(status, error_type, msg, None)
+    }
+
+    /// Create a Twirp error with optional meta
+    pub fn new_meta(status: StatusCode, error_type: &str, msg: &str, meta: Option<serde_json::Value>) -> TwirpError {
+        TwirpError { status, error_type: error_type.to_string(), msg: msg.to_string(), meta }
     }
 
     /// Create a byte-array service response for this error and the given status code
-    pub fn to_resp_raw(&self, status: StatusCode) -> ServiceResponse<Vec<u8>> {
+    pub fn to_resp_raw(&self) -> ServiceResponse<Vec<u8>> {
         let output = self.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
         let mut headers = Headers::new();
         headers.set(ContentType::json());
@@ -260,25 +258,26 @@ impl TwirpError {
         ServiceResponse {
             version: HttpVersion::default(),
             headers: headers,
-            status: status,
+            status: self.status,
             output
         }
     }
 
     /// Create a hyper response for this error and the given status code
-    pub fn to_hyper_resp(&self, status: StatusCode) -> Response {
+    pub fn to_hyper_resp(&self) -> Response {
         let body = self.to_json_bytes().unwrap_or_else(|_| "{}".as_bytes().to_vec());
         Response::new().
-            with_status(status).
+            with_status(self.status).
             with_header(ContentType::json()).
             with_header(ContentLength(body.len() as u64)).
             with_body(body)
     }
 
     /// Create error from Serde JSON value
-    pub fn from_json(json: serde_json::Value) -> TwirpError {
+    pub fn from_json(status: StatusCode, json: serde_json::Value) -> TwirpError {
         let error_type = json["error_type"].as_str();
         TwirpError {
+            status,
             error_type: error_type.unwrap_or("<no code>").to_string(),
             msg: json["msg"].as_str().unwrap_or("<no message>").to_string(),
             // Put the whole thing as meta if there was no type
@@ -287,8 +286,8 @@ impl TwirpError {
     }
 
     /// Create error from byte array
-    pub fn from_json_bytes(json: &[u8]) -> serde_json::Result<TwirpError> {
-        serde_json::from_slice(json).map(&TwirpError::from_json)
+    pub fn from_json_bytes(status: StatusCode, json: &[u8]) -> serde_json::Result<TwirpError> {
+        serde_json::from_slice(json).map(|v| TwirpError::from_json(status, v))
     }
 
     /// Create Serde JSON value from error
@@ -304,6 +303,10 @@ impl TwirpError {
     pub fn to_json_bytes(&self) -> serde_json::Result<Vec<u8>> {
         serde_json::to_vec(&self.to_json())
     }
+}
+
+impl From<TwirpError> for ProstTwirpError {
+    fn from(v: TwirpError) -> ProstTwirpError { ProstTwirpError::TwirpError(v) }
 }
 
 /// An error that can occur during a call to a Twirp service
@@ -353,8 +356,6 @@ pub struct HyperClient {
     pub client: Client<HttpConnector, Body>,
     /// The root URL without any path attached
     pub root_url: String,
-    /// True if this should use JSON instead of protobuf
-    pub json: bool,
 }
 
 impl HyperClient {
@@ -363,7 +364,6 @@ impl HyperClient {
         HyperClient {
             client,
             root_url: root_url.trim_right_matches('/').to_string(),
-            json: false,
         }
     }
 
@@ -415,20 +415,26 @@ impl<T: 'static + HyperService> Service for HyperServer<T> {
 
     fn call(&self, req: Request) -> Self::Future {
         if req.method() != &Method::Post {
-            Box::new(future::ok(TwirpError::new("bad_method", "Must be 'POST'").
-                to_hyper_resp(StatusCode::MethodNotAllowed)))
+            Box::new(future::ok(TwirpError::new(StatusCode::MethodNotAllowed, "bad_method", "Must be 'POST'").
+                to_hyper_resp()))
         } else {
             // Ug: https://github.com/tokio-rs/tokio-service/issues/9
             let service = self.service.clone();
             Box::new(ServiceRequest::from_hyper_raw(req).
                 and_then(move |v| service.handle(v)).
                 map(|v| v.to_hyper_raw()).
-                or_else(|err| {
-                    let (status, twirp_err) = match err.root_err() {
-                        // TODO
-                        _ => (StatusCode::InternalServerError, TwirpError::new("internal_err", "Internal Error"))
-                    };
-                    Ok(twirp_err.to_hyper_resp(status))
+                or_else(|err| match err.root_err() {
+                    ProstTwirpError::ProstDecodeError(_) =>
+                        Ok(TwirpError::new(StatusCode::BadRequest, "protobuf_decode_err", "Invalid protobuf body").
+                            to_hyper_resp()),
+                    ProstTwirpError::TwirpError(err) =>
+                        Ok(err.to_hyper_resp()),
+                    // Just propagate hyper errors
+                    ProstTwirpError::HyperError(err) =>
+                        Err(err),
+                    _ =>
+                        Ok(TwirpError::new(StatusCode::InternalServerError, "internal_err", "Internal Error").
+                            to_hyper_resp()),
                 }))
         }
     }

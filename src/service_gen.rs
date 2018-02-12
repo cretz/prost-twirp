@@ -97,7 +97,7 @@ impl TwirpServiceGenerator {
         // Final 404 arm and end fn
         buf.push_str(&format!(
             "\n            \
-                        _ => Box::new(::futures::future::ok({0}::TwirpError::new(\"not_found\", \"Not found\").to_resp_raw(::hyper::StatusCode::NotFound)))\n        \
+                        _ => Box::new(::futures::future::ok({0}::TwirpError::new(::hyper::StatusCode::NotFound, \"not_found\", \"Not found\").to_resp_raw()))\n        \
                     }}\n    \
                 }}\n\
             }}",
