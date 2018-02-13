@@ -2,6 +2,8 @@
 name = "prost-twirp"
 version = "0.1.0"
 authors = ["Chad Retz <chad.retz@gmail.com>"]
+description = "Code generator and library for calling/serving Twirp services in Rust using prost and hyper"
+license = "MIT"
 
 [features]
 service-gen = ["prost-build"]
