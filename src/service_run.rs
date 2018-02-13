@@ -415,8 +415,11 @@ impl<T: 'static + HyperService> Service for HyperServer<T> {
 
     fn call(&self, req: Request) -> Self::Future {
         if req.method() != &Method::Post {
-            Box::new(future::ok(TwirpError::new(StatusCode::MethodNotAllowed, "bad_method", "Must be 'POST'").
-                to_hyper_resp()))
+            Box::new(future::ok(TwirpError::new(StatusCode::MethodNotAllowed, "bad_method",
+                "Method must be POST").to_hyper_resp()))
+        } else if req.headers().get::<ContentType>().map(|v| format!("{}", v) == "application/protobuf") != Some(true) {
+            Box::new(future::ok(TwirpError::new(StatusCode::UnsupportedMediaType,
+                "bad_content_type", "Content type must be application/protobuf").to_hyper_resp()))
         } else {
             // Ug: https://github.com/tokio-rs/tokio-service/issues/9
             let service = self.service.clone();
