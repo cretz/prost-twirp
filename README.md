@@ -151,7 +151,7 @@ impl service::Haberdasher for HaberdasherService {
 Like other hyper services, this one returns a boxed future with the protobuf value. In this case, it just generates an
 instance of `Hat` every time. Errors can be returned which are in the form of a
 [ProstTwirpError](https://docs.rs/prost-twirp/*/prost_twirp/enum.ProstTwirpError.html). A
-[TwirpError](https://docs.rs/prost-twirp/*/prost_twirp/struct.ProstTwirpError.html) can be sent back instead. Here is an
+[TwirpError](https://docs.rs/prost-twirp/*/prost_twirp/struct.TwirpError.html) can be sent back instead. Here is an
 example of not accepting any size outside of some bounds:
 
 ```rust
