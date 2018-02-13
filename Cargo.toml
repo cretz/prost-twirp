@@ -5,6 +5,8 @@ authors = ["Chad Retz <chad.retz@gmail.com>"]
 description = "Code generator and library for calling/serving Twirp services in Rust using prost and hyper"
 license = "MIT"
 repository = "https://github.com/cretz/prost-twirp"
+documentation = "https://docs.rs/prost-twirp"
+readme = "README.md"
 exclude = ["examples/*"]
 
 [features]
