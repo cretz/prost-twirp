@@ -4,6 +4,8 @@ Prost Twirp is a code generator and set of utilities for calling and serving [Tw
 services in Rust, using the [prost](https://github.com/danburkert/prost/) and [hyper](https://github.com/hyperium/hyper)
 libraries.
 
+See usage detail below, [API docs](https://docs.rs/prost-twirp), and [examples](examples).
+
 ## Usage
 
 Prost Twirp supports the calling and the serving of Twirp services. Prost Twirp can be used in one of three ways:
@@ -26,13 +28,13 @@ the following to the dependencies and build dependencies of `Cargo.toml`:
 
 ```toml
 [dependencies]
-prost-twirp = <prost-twirp-version>
-futures = <futures-version>
-hyper = <hyper-version>
-tokio-core = <tokio-core-version>
+prost-twirp = "prost-twirp-version"
+futures = "futures-version"
+hyper = "hyper-version"
+tokio-core = "tokio-core-version"
 
 [build-dependencies]
-prost-twirp = { version = <prost-twirp-version>, features = ["service-gen"] }
+prost-twirp = { version = "prost-twirp-version", features = ["service-gen"] }
 ```
 
 This adds the supporting Prost Twirp library at runtime and the service generation support at build time. It also adds
@@ -96,7 +98,7 @@ This generates the following trait:
 /// A Haberdasher makes hats for clients.
 pub trait Haberdasher {
     /// MakeHat produces a hat of mysterious, randomly-selected color!
-    fn make_hat(&self, i: prost_twirp::PTReq<Size>) -> prost_twirp::PTRes<Hat>;
+    fn make_hat(&self, i: PTReq<Size>) -> PTRes<Hat>;
 }
 ```
 
@@ -133,16 +135,99 @@ Any error that can happen during the call results in an errored future with the
 
 ### Using the Server
 
-TODO
+The same trait that is used for the client is what must be implemented as a server. Here is an example implementation:
 
-### JSON Support
+```rust
+pub struct HaberdasherService;
+impl service::Haberdasher for HaberdasherService {
+    fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
+        Box::new(future::ok(
+            service::Hat { size: i.input.inches, color: "blue".to_string(), name: "fedora".to_string() }.into()
+        ))
+    }
+}
+```
 
-TODO
+Like other hyper services, this one returns a boxed future with the protobuf value. In this case, it just generates an
+instance of `Hat` every time. Errors can be returned which are in the form of a
+[ProstTwirpError](https://docs.rs/prost-twirp/*/prost_twirp/enum.ProstTwirpError.html). A
+[TwirpError](https://docs.rs/prost-twirp/*/prost_twirp/struct.ProstTwirpError.html) can be sent back instead. Here is an
+example of not accepting any size outside of some bounds:
+
+```rust
+pub struct HaberdasherService;
+impl service::Haberdasher for HaberdasherService {
+    fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
+        Box::new(future::result(
+            if i.input.inches < 1 {
+                Err(TwirpError::new(StatusCode::BadRequest, "too_small", "Size too small")
+            } else if i.input.inches > 10 {
+                Err(TwirpError::new(StatusCode::BadRequest, "too_large", "Size too large")
+            } else {
+                Ok(service::Hat { size: i.input.inches, color: "blue".to_string(), name: "fedora".to_string() }.into())
+            }
+        ))
+    }
+}
+```
+
+Metadata in the form of a `serde_json::Value` can be given to a `TwirpError` as well. To start the service, there is a
+`ServiceName::new_server` call that accepts an implementation of the trait and returns a `hyper::server::Service` that
+can be [used like any other hyper service](https://hyper.rs/guides/server/hello-world/). E.g.
+
+```rust
+let addr = "0.0.0.0:8080".parse().unwrap();
+let server = Http::new().bind(&addr,
+    move || Ok(service::Haberdasher::new_server(HaberdasherService))).unwrap();
+server.run().unwrap();
+```
+
+Note, due to [some tokio service restrictions](https://github.com/tokio-rs/tokio-service/issues/9), the service
+implementation has to have a `'static` lifetime.
 
 ### Embedding the Runtime
 
-TODO
+Instead of having a runtime dependency on the `prost_twirp` crate, it can be embedded instead. By creating the
+`TwirpServiceGenerator` as a mut variable and setting `embed_client` to true, the entire runtime code (not that big)
+will be put in a `prost_twirp` nested module and referenced in the generated code. This means that `prost-twirp` doesn't
+have to be set in the `[dependencies]` for runtime. However, besides `prost` and `prost-derive` runtime libraries,
+Prost Twirp does still require `serde_json` at runtime for error serialization.
 
 ### Manual Client and Server
 
-TODO
+Instead of code generation, some of the features of Prost Twirp can be used manually.
+
+For the client, a new [HyperClient](https://docs.rs/prost-twirp/*/prost_twirp/struct.HyperClient.html) can be created
+with the root URL and `hyper` client. Then, `go` can be invoked with a path and
+a [ServiceRequest](https://docs.rs/prost-twirp/*/prost_twirp/struct.ServiceRequest.html) for a `prost`-built message.
+The response is a boxed future of a
+[ServiceResponse](https://docs.rs/prost-twirp/*/prost_twirp/struct.ServiceResponse.html) that must be typed with the
+expected `prost`-built output type. Example:
+
+```rust
+let prost_client = HyperClient::new(hyper_client, "http://localhost:8080");
+let work = prost_client.
+    go("/twirp/twitch.twirp.example.Haberdasher/MakeHat",
+        ServiceRequest::new(service::Size { inches: 12 })).
+    and_then(|res| {
+        let hat: service::Hat = res.output;
+        Ok(println!("Made {:?}", hat))
+    });
+```
+
+For the server, a new [HyperServer](https://docs.rs/prost-twirp/*/prost_twirp/struct.HyperServer.html) can be created
+passing in an impl of [HyperService](https://docs.rs/prost-twirp/*/prost_twirp/trait.HyperService.html). The
+`HyperService` trait is essentially just a handler for accepting a `ServiceRequest<Vec<u8>>` and returning a boxed
+future of `ServiceResponse<Vec<u8>>`. Inside the handler, `prost`-built structs can be serialized/deserialized.
+
+### FAQ
+
+**Why no JSON support?**
+
+This could be done soon. I am investigating whether this is as easy as a couple of `serde` attributes or if it is more
+involved.
+
+**Why does my server service impl have to be `'static`?**
+
+This is due to the need to reference the service inside of static futures. See
+[this issue](https://github.com/tokio-rs/tokio-service/issues/9). Any better solution is welcome.
