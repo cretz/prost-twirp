@@ -19,3 +19,11 @@ prost = "0.3"
 serde_json = "1.0"
 
 prost-build = { version = "0.3", optional = true }
+
+[workspace]
+members = [
+    "examples/errors",
+    "examples/no-service-gen",
+    "examples/service-gen",
+    "examples/service-gen-no-runtime",
+]
