@@ -1,5 +1,7 @@
 # Prost Twirp
 
+⚠️This repository/project is essentially abandoned. The original author no longer works on it.
+
 Prost Twirp is a code generator and set of utilities for calling and serving [Twirp](https://github.com/twitchtv/twirp)
 services in Rust, using the [prost](https://github.com/danburkert/prost/) and [hyper](https://github.com/hyperium/hyper)
 libraries.
