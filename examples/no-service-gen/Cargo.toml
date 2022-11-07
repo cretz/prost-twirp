@@ -1,17 +1,18 @@
 [package]
-name = "example-no-service-gen"
-version = "0.1.0"
+name = "prost-twirp-example-no-service-gen"
+version = "0.2.0-pre"
 authors = ["Chad Retz <chad.retz@gmail.com>"]
 build = "build.rs"
+publish = false
 
 [dependencies]
 bytes = "0.4"
 futures = "0.1"
 hyper = "0.11"
-prost = "0.3"
-prost-derive = "0.3"
+prost = "0.11"
+prost-derive = "0.11"
 prost-twirp = { path = "../../" }
 tokio-core = "0.1"
 
 [build-dependencies]
-prost-build = "0.3"
+prost-build = "0.11"

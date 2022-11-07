@@ -1,6 +1,6 @@
 [package]
 name = "prost-twirp"
-version = "0.1.0"
+version = "0.2.0-pre"
 authors = ["Chad Retz <chad.retz@gmail.com>"]
 description = "Code generator and library for calling/serving Twirp services in Rust using prost and hyper"
 license = "MIT"
@@ -15,10 +15,10 @@ service-gen = ["prost-build"]
 [dependencies]
 futures = "0.1"
 hyper = "0.11"
-prost = "0.3"
+prost = "0.11"
 serde_json = "1.0"
 
-prost-build = { version = "0.3", optional = true }
+prost-build = { version = "0.11", optional = true }
 
 [workspace]
 members = [

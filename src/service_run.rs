@@ -117,7 +117,7 @@ impl ServiceRequest<Vec<u8>> {
     pub fn to_proto<T: Message + Default + 'static>(
         &self,
     ) -> Result<ServiceRequest<T>, ProstTwirpError> {
-        match T::decode(&self.input) {
+        match T::decode(&*self.input) {
             Ok(v) => Ok(self.clone_with_input(v)),
             Err(err) => Err(self.body_err(ProstTwirpError::ProstDecodeError(err))),
         }
@@ -238,7 +238,7 @@ impl ServiceResponse<Vec<u8>> {
         &self,
     ) -> Result<ServiceResponse<T>, ProstTwirpError> {
         if self.status.is_success() {
-            match T::decode(&self.output) {
+            match T::decode(&*self.output) {
                 Ok(v) => Ok(self.clone_with_output(v)),
                 Err(err) => Err(self.body_err(ProstTwirpError::ProstDecodeError(err))),
             }

@@ -1,7 +1,6 @@
 extern crate futures;
 extern crate hyper;
 extern crate prost;
-#[macro_use]
 extern crate prost_derive;
 extern crate prost_twirp;
 #[macro_use]
