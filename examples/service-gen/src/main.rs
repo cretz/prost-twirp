@@ -31,7 +31,7 @@ fn main() {
             let addr = "0.0.0.0:8080".parse().unwrap();
             let server = Http::new()
                 .bind(&addr, move || {
-                    Ok(service::Haberdasher::new_server(HaberdasherService))
+                    Ok(<dyn service::Haberdasher>::new_server(HaberdasherService))
                 })
                 .unwrap();
             server.run_until(shutdown_recv.map_err(|_| ())).unwrap();
@@ -51,7 +51,7 @@ fn main() {
         let mut core = Core::new().unwrap();
         let hyper_client = Client::new(&core.handle());
         let service_client =
-            service::Haberdasher::new_client(hyper_client, "http://localhost:8080");
+            <dyn service::Haberdasher>::new_client(hyper_client, "http://localhost:8080");
         // Run the 5 like the other client
         let work = future::join_all((0..5).map(|_| {
             service_client

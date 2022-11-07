@@ -9,13 +9,13 @@ use prost::{DecodeError, EncodeError, Message};
 use serde_json;
 use std::sync::Arc;
 
-pub type FutReq<T> = Box<Future<Item = ServiceRequest<T>, Error = ProstTwirpError>>;
+pub type FutReq<T> = Box<dyn Future<Item = ServiceRequest<T>, Error = ProstTwirpError>>;
 
 /// The type of every service request
 pub type PTReq<I> = ServiceRequest<I>;
 
 /// The type of every service response
-pub type PTRes<O> = Box<Future<Item = ServiceResponse<O>, Error = ProstTwirpError>>;
+pub type PTRes<O> = Box<dyn Future<Item = ServiceResponse<O>, Error = ProstTwirpError>>;
 
 /// A request with HTTP info and the serialized input object
 #[derive(Debug)]
@@ -435,7 +435,7 @@ impl HyperClient {
     pub fn new(client: Client<HttpConnector, Body>, root_url: &str) -> HyperClient {
         HyperClient {
             client,
-            root_url: root_url.trim_right_matches('/').to_string(),
+            root_url: root_url.trim_end_matches('/').to_string(),
         }
     }
 
@@ -446,7 +446,7 @@ impl HyperClient {
         O: Message + Default + 'static,
     {
         // Build the URI
-        let uri = match format!("{}/{}", self.root_url, path.trim_left_matches('/')).parse() {
+        let uri = match format!("{}/{}", self.root_url, path.trim_start_matches('/')).parse() {
             Err(err) => {
                 return Box::new(future::err(ProstTwirpError::HyperError(hyper::Error::Uri(
                     err,
@@ -497,7 +497,7 @@ impl<T: 'static + HyperService> Service for HyperServer<T> {
     type Request = Request;
     type Response = Response;
     type Error = hyper::Error;
-    type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
+    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
 
     fn call(&self, req: Request) -> Self::Future {
         if req.method() != &Method::Post {
