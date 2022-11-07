@@ -12,7 +12,7 @@ use futures::Future;
 use hyper::server::Http;
 use hyper::{Client, Method, StatusCode};
 use prost_twirp::{
-    FutResp, HyperClient, HyperServer, HyperService, ServiceRequest, ServiceResponse, TwirpError,
+    HyperClient, HyperServer, HyperService, PTRes, ServiceRequest, ServiceResponse, TwirpError,
 };
 use std::env;
 use std::thread;
@@ -71,7 +71,7 @@ fn main() {
 
 struct MyServer;
 impl HyperService for MyServer {
-    fn handle(&self, req: ServiceRequest<Vec<u8>>) -> FutResp<Vec<u8>> {
+    fn handle(&self, req: ServiceRequest<Vec<u8>>) -> PTRes<Vec<u8>> {
         match (req.method.clone(), req.uri.path()) {
             (Method::Post, "/twirp/twitch.twirp.example.Haberdasher/MakeHat") => {
                 Box::new(future::result(req.to_proto().and_then(|req| {
@@ -85,7 +85,7 @@ impl HyperService for MyServer {
                 })))
             }
             _ => Box::new(future::ok(
-                TwirpError::new("not_found", "Not found").to_resp_raw(StatusCode::NotFound),
+                TwirpError::new(StatusCode::NotFound, "not_found", "Not found").to_resp_raw(),
             )),
         }
     }
