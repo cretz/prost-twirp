@@ -1,19 +1,10 @@
-extern crate futures;
-extern crate hyper;
-extern crate prost;
-extern crate prost_derive;
-extern crate prost_twirp;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate tokio_core;
-
 use futures::future;
 use futures::sync::oneshot;
 use futures::Future;
 use hyper::server::Http;
 use hyper::{Client, StatusCode};
 use prost_twirp::TwirpError;
+use serde_derive::{Deserialize, Serialize};
 use std::env;
 use std::thread;
 use std::time::Duration;

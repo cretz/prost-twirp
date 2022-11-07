@@ -4,6 +4,7 @@ version = "0.2.0-pre"
 authors = ["Chad Retz <chad.retz@gmail.com>"]
 build = "build.rs"
 publish = false
+edition = "2021"
 
 [dependencies]
 bytes = "0.4"

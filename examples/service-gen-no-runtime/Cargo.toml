@@ -1,9 +1,10 @@
 [package]
 name = "prost-twirp-example-service-gen-no-runtime"
-version = "0.1.0"
+version = "0.2.0-pre"
 authors = ["Chad Retz <chad.retz@gmail.com>"]
 build = "build.rs"
 publish = false
+edition = "2021"
 
 [dependencies]
 bytes = "0.4"

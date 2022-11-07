@@ -1,10 +1,3 @@
-extern crate futures;
-extern crate hyper;
-extern crate prost;
-extern crate prost_derive;
-extern crate serde_json;
-extern crate tokio_core;
-
 use futures::future;
 use futures::sync::oneshot;
 use futures::Future;

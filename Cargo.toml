@@ -8,6 +8,7 @@ repository = "https://github.com/cretz/prost-twirp"
 documentation = "https://docs.rs/prost-twirp"
 readme = "README.md"
 exclude = ["examples/*"]
+edition = "2021"
 
 [features]
 service-gen = ["prost-build"]

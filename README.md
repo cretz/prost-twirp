@@ -42,8 +42,6 @@ This adds the supporting Prost Twirp library at runtime and the service generati
 service at runtime. Previously, the build script code in `build.rs` might have been:
 
 ```rust
-extern crate prost_build;
-
 fn main() {
     prost_build::compile_protos(&["src/service.proto"], &["src/"]).unwrap();
 }
@@ -53,9 +51,6 @@ That would just generate the protobuf structs, but not the service. Now change i
 generator:
 
 ```rust
-extern crate prost_build;
-extern crate prost_twirp;
-
 fn main() {
     let mut conf = prost_build::Config::new();
     conf.service_generator(Box::new(prost_twirp::TwirpServiceGenerator::new()));
@@ -67,13 +62,6 @@ Now the included file contains a service client and server. As in the `prost-bui
 `main.rs`:
 
 ```rust
-extern crate futures;
-extern crate hyper;
-extern crate prost;
-#[macro_use]
-extern crate prost_derive;
-extern crate prost_twirp;
-
 mod service {
     include!(concat!(env!("OUT_DIR"), "/twitch.twirp.example.rs"));
 }
