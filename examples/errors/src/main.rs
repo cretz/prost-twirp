@@ -9,11 +9,11 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate tokio_core;
 
-use futures::Future;
 use futures::future;
 use futures::sync::oneshot;
-use hyper::{Client, StatusCode};
+use futures::Future;
 use hyper::server::Http;
+use hyper::{Client, StatusCode};
 use prost_twirp::TwirpError;
 use std::env;
 use std::thread;
@@ -33,8 +33,11 @@ fn main() {
         let thread_res = thread::spawn(|| {
             println!("Starting server");
             let addr = "0.0.0.0:8080".parse().unwrap();
-            let server = Http::new().bind(&addr,
-                move || Ok(service::Haberdasher::new_server(HaberdasherService))).unwrap();
+            let server = Http::new()
+                .bind(&addr, move || {
+                    Ok(service::Haberdasher::new_server(HaberdasherService))
+                })
+                .unwrap();
             server.run_until(shutdown_recv.map_err(|_| ())).unwrap();
             println!("Server stopped");
         });
@@ -42,18 +45,29 @@ fn main() {
         if run_client {
             thread::sleep(Duration::from_millis(1000));
         } else {
-            if let Err(err) = thread_res.join() { println!("Server panicked: {:?}", err); }
+            if let Err(err) = thread_res.join() {
+                println!("Server panicked: {:?}", err);
+            }
         }
     }
 
     if run_client {
         let mut core = Core::new().unwrap();
         let hyper_client = Client::new(&core.handle());
-        let service_client = service::Haberdasher::new_client(hyper_client, "http://localhost:8080");
+        let service_client =
+            service::Haberdasher::new_client(hyper_client, "http://localhost:8080");
         // Try one too small, then too large, then just right
-        let work = future::join_all(vec![0, 11, 5].into_iter().map(|inches|
-            service_client.make_hat(service::Size { inches }.into()).then(move |res|
-                Ok::<(), ()>(println!("For size {}: {:?}", inches, res.map(|v| v.output).map_err(|e| e.root_err()))))));
+        let work = future::join_all(vec![0, 11, 5].into_iter().map(|inches| {
+            service_client
+                .make_hat(service::Size { inches }.into())
+                .then(move |res| {
+                    Ok::<(), ()>(println!(
+                        "For size {}: {:?}",
+                        inches,
+                        res.map(|v| v.output).map_err(|e| e.root_err())
+                    ))
+                })
+        }));
         core.run(work).unwrap();
         shutdown_send.send(()).unwrap();
     }
@@ -62,19 +76,35 @@ fn main() {
 pub struct HaberdasherService;
 impl service::Haberdasher for HaberdasherService {
     fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
-        Box::new(future::result(
-            if i.input.inches < 1 {
-                Err(TwirpError::new_meta(StatusCode::BadRequest, "too_small", "Size too small",
-                    serde_json::to_value(MinMaxSize { min: 1, max: 10 }).ok()).into())
-            } else if i.input.inches > 10 {
-                Err(TwirpError::new_meta(StatusCode::BadRequest, "too_large", "Size too large",
-                    serde_json::to_value(MinMaxSize { min: 1, max: 10 }).ok()).into())
-            } else {
-                Ok(service::Hat { size: i.input.inches, color: "blue".to_string(), name: "fedora".to_string() }.into())
+        Box::new(future::result(if i.input.inches < 1 {
+            Err(TwirpError::new_meta(
+                StatusCode::BadRequest,
+                "too_small",
+                "Size too small",
+                serde_json::to_value(MinMaxSize { min: 1, max: 10 }).ok(),
+            )
+            .into())
+        } else if i.input.inches > 10 {
+            Err(TwirpError::new_meta(
+                StatusCode::BadRequest,
+                "too_large",
+                "Size too large",
+                serde_json::to_value(MinMaxSize { min: 1, max: 10 }).ok(),
+            )
+            .into())
+        } else {
+            Ok(service::Hat {
+                size: i.input.inches,
+                color: "blue".to_string(),
+                name: "fedora".to_string(),
             }
-        ))
+            .into())
+        }))
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct MinMaxSize { min: i32, max: i32 }
+struct MinMaxSize {
+    min: i32,
+    max: i32,
+}

@@ -7,9 +7,17 @@ pub struct TwirpServiceGenerator {
 }
 
 impl TwirpServiceGenerator {
-    pub fn new() -> TwirpServiceGenerator { Default::default() }
+    pub fn new() -> TwirpServiceGenerator {
+        Default::default()
+    }
 
-    fn prost_twirp_mod(&self) -> &str { if self.embed_client { "prost_twirp" } else { "::prost_twirp" } }
+    fn prost_twirp_mod(&self) -> &str {
+        if self.embed_client {
+            "prost_twirp"
+        } else {
+            "::prost_twirp"
+        }
+    }
 
     fn generate_type_aliases(&mut self, buf: &mut String) {
         if !self.type_aliases_generated {
@@ -18,7 +26,8 @@ impl TwirpServiceGenerator {
                 "\n\
                 pub type PTReq<I> = {0}::PTReq<I>;\n\
                 pub type PTRes<O> = {0}::PTRes<O>;\n",
-                self.prost_twirp_mod()));
+                self.prost_twirp_mod()
+            ));
         }
     }
 
@@ -35,8 +44,13 @@ impl TwirpServiceGenerator {
     }
 
     fn method_sig(&self, method: &Method) -> String {
-        format!("fn {0}(&self, i: {1}::PTReq<{2}>) -> {1}::PTRes<{3}>",
-            method.name, self.prost_twirp_mod(), method.input_type, method.output_type)
+        format!(
+            "fn {0}(&self, i: {1}::PTReq<{2}>) -> {1}::PTRes<{3}>",
+            method.name,
+            self.prost_twirp_mod(),
+            method.input_type,
+            method.output_type
+        )
     }
 
     fn generate_main_impl(&self, service: &Service, buf: &mut String) {
@@ -57,7 +71,9 @@ impl TwirpServiceGenerator {
     fn generate_client_struct(&self, service: &Service, buf: &mut String) {
         buf.push_str(&format!(
             "\npub struct {}Client(pub {}::HyperClient);\n",
-            service.name, self.prost_twirp_mod()));
+            service.name,
+            self.prost_twirp_mod()
+        ));
     }
 
     fn generate_client_impl(&self, service: &Service, buf: &mut String) {
@@ -66,7 +82,12 @@ impl TwirpServiceGenerator {
             buf.push_str(&format!(
                 "\n    {} {{\n        \
                     self.0.go(\"/twirp/{}.{}/{}\", i)\n    \
-                }}\n", self.method_sig(method), service.package, service.proto_name, method.proto_name));
+                }}\n",
+                self.method_sig(method),
+                service.package,
+                service.proto_name,
+                method.proto_name
+            ));
         }
         buf.push_str("}\n");
     }
@@ -74,7 +95,8 @@ impl TwirpServiceGenerator {
     fn generate_server_struct(&self, service: &Service, buf: &mut String) {
         buf.push_str(&format!(
             "\npub struct {0}Server<T: 'static + {0}>(::std::sync::Arc<T>);\n",
-            service.name));
+            service.name
+        ));
     }
 
     fn generate_server_impl(&self, service: &Service, buf: &mut String) {
