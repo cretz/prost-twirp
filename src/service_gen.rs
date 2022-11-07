@@ -56,12 +56,12 @@ impl TwirpServiceGenerator {
     fn generate_main_impl(&self, service: &Service, buf: &mut String) {
         buf.push_str(&format!(
             "\n\
-            impl {0} {{\n    \
-                pub fn new_client(client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>, root_url: &str) -> Box<{0}> {{\n        \
+            impl dyn {0} {{\n    \
+                pub fn new_client(client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>, root_url: &str) -> Box<dyn {0}> {{\n        \
                     Box::new({0}Client({1}::HyperClient::new(client, root_url)))\n    \
                 }}\n    \
-                pub fn new_server<T: 'static + {0}>(v: T) -> Box<::hyper::server::Service<Request=::hyper::Request,\n            \
-                        Response=::hyper::Response, Error=::hyper::Error, Future=Box<::futures::Future<Item=::hyper::Response, Error=::hyper::Error>>>> {{\n        \
+                pub fn new_server<T: 'static + {0}>(v: T) -> Box<dyn (::hyper::server::Service<Request=::hyper::Request,\n            \
+                        Response=::hyper::Response, Error=::hyper::Error, Future=Box<dyn (::futures::Future<Item=::hyper::Response, Error=::hyper::Error>)>>)> {{\n        \
                     Box::new({1}::HyperServer::new({0}Server(::std::sync::Arc::new(v))))\n    \
                 }}\n\
             }}\n",
