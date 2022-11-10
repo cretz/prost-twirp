@@ -1,7 +1,7 @@
+use futures::channel::oneshot;
 use futures::future;
-use futures::sync::oneshot;
-use futures::Future;
-use hyper::server::Http;
+
+use hyper::server::conn::Http;
 use hyper::Client;
 use std::env;
 use std::thread;
@@ -41,7 +41,7 @@ fn main() {
 
     if run_client {
         let mut core = Core::new().unwrap();
-        let hyper_client = Client::new(&core.handle());
+        let hyper_client = Client::new();
         let service_client =
             <dyn service::Haberdasher>::new_client(hyper_client, "http://localhost:8080");
         // Run the 5 like the other client

@@ -1,6 +1,5 @@
+use futures::channel::oneshot;
 use futures::future;
-use futures::sync::oneshot;
-use futures::Future;
 use hyper::server::Http;
 use hyper::{Client, StatusCode};
 use prost_twirp::TwirpError;
@@ -66,7 +65,7 @@ fn main() {
 pub struct HaberdasherService;
 impl service::Haberdasher for HaberdasherService {
     fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
-        Box::new(future::result(if i.input.inches < 1 {
+        Box::new(future::ok(if i.input.inches < 1 {
             Err(TwirpError::new_meta(
                 StatusCode::BadRequest,
                 "too_small",

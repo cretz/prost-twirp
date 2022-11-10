@@ -1,84 +1,89 @@
-use futures::future;
-use futures::sync::oneshot;
-use futures::Future;
-use hyper::server::Http;
-use hyper::{Client, Method, StatusCode};
-use prost_twirp::{
-    HyperClient, HyperServer, HyperService, PTRes, ServiceRequest, ServiceResponse, TwirpError,
-};
+#![allow(unused_imports)]
+use std::convert::Infallible;
 use std::env;
 use std::thread;
 use std::time::Duration;
-use tokio_core::reactor::Core;
+
+use futures::channel::oneshot;
+use futures::future;
+use futures::TryFutureExt;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::Body;
+use hyper::Request;
+use hyper::Response;
+use hyper::Server;
+use hyper::{Client, Method, StatusCode};
+use prost_twirp::ProstTwirpError;
+use prost_twirp::{
+    HyperClient, HyperServer, HyperService, PTRes, ServiceRequest, ServiceResponse, TwirpError,
+};
 
 mod service {
     include!(concat!(env!("OUT_DIR"), "/twitch.twirp.example.rs"));
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let run_server = env::args().any(|s| s == "--server");
     let run_client = !run_server || env::args().any(|s| s == "--client");
-    let (shutdown_send, shutdown_recv) = oneshot::channel();
+    let (shutdown_send, shutdown_recv) = oneshot::channel::<()>();
 
     if run_server {
-        let thread_res = thread::spawn(|| {
+        let thread_res = tokio::spawn(async {
             println!("Starting server");
             let addr = "0.0.0.0:8080".parse().unwrap();
-            let server = Http::new()
-                .bind(&addr, move || Ok(HyperServer::new(MyServer)))
-                .unwrap();
-            server.run_until(shutdown_recv.map_err(|_| ())).unwrap();
+            let make_service =
+                make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+            let server = Server::bind(&addr).serve(make_service);
+            let graceful = server.with_graceful_shutdown(async {
+                shutdown_recv.await.ok();
+            });
+            graceful.await.unwrap();
             println!("Server stopped");
         });
         // Wait a sec or forever depending on whether there's client code to run
         if run_client {
             thread::sleep(Duration::from_millis(1000));
         } else {
-            if let Err(err) = thread_res.join() {
-                println!("Server panicked: {:?}", err);
-            }
+            thread_res.await.unwrap();
+            // if let Err(err) = thread_res.join() {
+            //     println!("Server panicked: {:?}", err);
+            // }
         }
     }
 
-    if run_client {
-        let mut core = Core::new().unwrap();
-        let hyper_client = Client::new(&core.handle());
-        let prost_client = HyperClient::new(hyper_client, "http://localhost:8080");
-        // Run the 5 like the other client
-        let work = future::join_all((0..5).map(|_| {
-            prost_client
-                .go(
-                    "/twirp/twitch.twirp.example.Haberdasher/MakeHat",
-                    ServiceRequest::new(service::Size { inches: 12 }),
-                )
-                .and_then(|res| {
-                    let hat: service::Hat = res.output;
-                    Ok(println!("Made {:?}", hat))
-                })
-        }));
-        core.run(work).unwrap();
-        shutdown_send.send(()).unwrap();
-    }
+    // if run_client {
+    //     let hyper_client = Client::new();
+    //     let prost_client = HyperClient::new(hyper_client, "http://localhost:8080");
+    //     // Run the 5 like the other client
+    //     let work = future::join_all((0..5).map(|_| {
+    //         prost_client
+    //             .go(
+    //                 "/twirp/twitch.twirp.example.Haberdasher/MakeHat",
+    //                 ServiceRequest::new(service::Size { inches: 12 }),
+    //             )
+    //             .and_then(|res| {
+    //                 let hat: service::Hat = res.output;
+    //                 Ok(println!("Made {:?}", hat))
+    //             })
+    //     }));
+    //     shutdown_send.send(()).unwrap();
+    // }
 }
 
-struct MyServer;
-impl HyperService for MyServer {
-    fn handle(&self, req: ServiceRequest<Vec<u8>>) -> PTRes<Vec<u8>> {
-        match (req.method.clone(), req.uri.path()) {
-            (Method::Post, "/twirp/twitch.twirp.example.Haberdasher/MakeHat") => {
-                Box::new(future::result(req.to_proto().and_then(|req| {
-                    let size: service::Size = req.input;
-                    ServiceResponse::new(service::Hat {
-                        size: size.inches,
-                        color: "blue".to_string(),
-                        name: "fedora".to_string(),
-                    })
-                    .to_proto_raw()
-                })))
-            }
-            _ => Box::new(future::ok(
-                TwirpError::new(StatusCode::NotFound, "not_found", "Not found").to_resp_raw(),
-            )),
-        }
+async fn handle(req: Request<Body>) -> Result<Response<Body>, TwirpError> {
+    match (req.method(), req.uri().path()) {
+        //     (Method::POST, "/twirp/twitch.twirp.example.Haberdasher/MakeHat") => Box::pin(async {
+        //         let size: service::Size = req.to_proto()?.input;
+        //         Ok(ServiceResponse::new(service::Hat {
+        //             size: size.inches,
+        //             color: "blue".to_string(),
+        //             name: "fedora".to_string(),
+        //         })
+        //         .to_proto_raw())
+        //     }),
+        _ => Ok(
+            TwirpError::new(StatusCode::NOT_FOUND, "not_found", "Not found").to_hyper_body_resp(),
+        ),
     }
 }
