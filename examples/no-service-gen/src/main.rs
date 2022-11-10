@@ -7,6 +7,7 @@ use std::time::Duration;
 use futures::channel::oneshot;
 use futures::future;
 use futures::TryFutureExt;
+use hyper::http::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Body;
 use hyper::Request;
@@ -71,17 +72,34 @@ async fn main() {
     // }
 }
 
-async fn handle(req: Request<Body>) -> Result<Response<Body>, TwirpError> {
-    match (req.method(), req.uri().path()) {
-        //     (Method::POST, "/twirp/twitch.twirp.example.Haberdasher/MakeHat") => Box::pin(async {
-        //         let size: service::Size = req.to_proto()?.input;
-        //         Ok(ServiceResponse::new(service::Hat {
-        //             size: size.inches,
-        //             color: "blue".to_string(),
-        //             name: "fedora".to_string(),
-        //         })
-        //         .to_proto_raw())
-        //     }),
+async fn handle(req: Request<Body>) -> Result<Response<Body>, ProstTwirpError> {
+    if req.method() != Method::POST {
+        let mut response = TwirpError::new(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method_not_allowed",
+            "Only POST",
+        )
+        .to_hyper_body_resp();
+        response
+            .headers_mut()
+            .insert("Allow", HeaderValue::from_static("POST"));
+        return Ok(response);
+    }
+    match req.uri().path() {
+        "/twirp/twitch.twirp.example.Haberdasher/MakeHat" => {
+            let size: service::Size =
+                <ServiceRequest<service::Size>>::from_hyper_body_proto_request(req)
+                    .await?
+                    .input;
+            todo!()
+            //         Ok(ServiceResponse::new(service::Hat {
+            //             size: size.inches,
+            //             color: "blue".to_string(),
+            //             name: "fedora".to_string(),
+            //         })
+            //         .to_proto_raw())
+            //     }),
+        }
         _ => Ok(
             TwirpError::new(StatusCode::NOT_FOUND, "not_found", "Not found").to_hyper_body_resp(),
         ),
