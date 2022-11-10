@@ -98,6 +98,23 @@ impl ServiceRequest<Vec<u8>> {
         }
     }
 
+    pub async fn from_hyper_body_request(
+        req: Request<Body>,
+    ) -> Result<ServiceRequest<Vec<u8>>, ProstTwirpError> {
+        let uri = req.uri().clone();
+        let method = req.method().clone();
+        let version = req.version().clone();
+        let headers = req.headers().clone();
+        let input = hyper::body::to_bytes(req.into_body()).await?.to_vec();
+        Ok(ServiceRequest {
+            uri,
+            method,
+            version,
+            headers,
+            input,
+        })
+    }
+
     /// Turn a byte-array service request into a hyper request
     pub fn to_hyper_raw(&self) -> Request<Body> {
         let mut builder = Request::post(self.uri.clone());
@@ -145,6 +162,13 @@ impl<T: Message + Default + 'static> ServiceRequest<T> {
     /// Turn a hyper request into a protobuf service request
     pub fn from_hyper_proto(req: Request<Vec<u8>>) -> FutReq<T> {
         Box::new(ready(ServiceRequest::from_hyper_raw(req).to_proto()))
+    }
+
+    pub async fn from_hyper_body_proto_request(
+        req: Request<Body>,
+    ) -> Result<ServiceRequest<T>, ProstTwirpError> {
+        let req = ServiceRequest::from_hyper_body_request(req).await?;
+        req.to_proto()
     }
 
     /// Turn a protobuf service request into a hyper request
@@ -456,6 +480,20 @@ impl ProstTwirpError {
         }
     }
 }
+
+impl From<hyper::Error> for ProstTwirpError {
+    fn from(v: hyper::Error) -> ProstTwirpError {
+        ProstTwirpError::HyperError(v)
+    }
+}
+
+impl Display for ProstTwirpError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for ProstTwirpError {}
 
 /// A wrapper for a hyper client
 #[derive(Debug)]
