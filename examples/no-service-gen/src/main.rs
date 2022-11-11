@@ -47,29 +47,27 @@ async fn main() {
             thread::sleep(Duration::from_millis(1000));
         } else {
             thread_res.await.unwrap();
-            // if let Err(err) = thread_res.join() {
-            //     println!("Server panicked: {:?}", err);
-            // }
         }
     }
 
-    // if run_client {
-    //     let hyper_client = Client::new();
-    //     let prost_client = HyperClient::new(hyper_client, "http://localhost:8080");
-    //     // Run the 5 like the other client
-    //     let work = future::join_all((0..5).map(|_| {
-    //         prost_client
-    //             .go(
-    //                 "/twirp/twitch.twirp.example.Haberdasher/MakeHat",
-    //                 ServiceRequest::new(service::Size { inches: 12 }),
-    //             )
-    //             .and_then(|res| {
-    //                 let hat: service::Hat = res.output;
-    //                 Ok(println!("Made {:?}", hat))
-    //             })
-    //     }));
-    //     shutdown_send.send(()).unwrap();
-    // }
+    if run_client {
+        let hyper_client = Client::new();
+        let prost_client = HyperClient::new(hyper_client, "http://localhost:8080");
+        // Run the 5 like the other client
+        future::join_all((0..5).map(|_| async {
+            let response: ServiceResponse<service::Hat> = prost_client
+                .go(
+                    "/twirp/twitch.twirp.example.Haberdasher/MakeHat",
+                    ServiceRequest::new(service::Size { inches: 12 }),
+                )
+                .await
+                .unwrap();
+            let hat: service::Hat = response.output;
+            println!("Made {:?}", hat)
+        }))
+        .await;
+        shutdown_send.send(()).unwrap();
+    }
 }
 
 async fn handle(req: Request<Body>) -> Result<Response<Body>, ProstTwirpError> {
@@ -87,18 +85,15 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>, ProstTwirpError> {
     }
     match req.uri().path() {
         "/twirp/twitch.twirp.example.Haberdasher/MakeHat" => {
-            let size: service::Size =
-                <ServiceRequest<service::Size>>::from_hyper_body_proto_request(req)
-                    .await?
-                    .input;
-            todo!()
-            //         Ok(ServiceResponse::new(service::Hat {
-            //             size: size.inches,
-            //             color: "blue".to_string(),
-            //             name: "fedora".to_string(),
-            //         })
-            //         .to_proto_raw())
-            //     }),
+            let size: service::Size = ServiceRequest::from_hyper_body_proto_request(req)
+                .await?
+                .input;
+            ServiceResponse::new(service::Hat {
+                size: size.inches,
+                color: "blue".to_string(),
+                name: "fedora".to_string(),
+            })
+            .to_hyper_body_proto()
         }
         _ => Ok(
             TwirpError::new(StatusCode::NOT_FOUND, "not_found", "Not found").to_hyper_body_resp(),
