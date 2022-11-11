@@ -257,6 +257,15 @@ impl ServiceResponse<Vec<u8>> {
             .unwrap()
     }
 
+    pub fn to_hyper_body_raw(&self) -> Response<Body> {
+        let mut builder = Response::builder().status(self.status);
+        builder.headers_mut().unwrap().clone_from(&self.headers);
+        builder
+            .header(CONTENT_LENGTH, self.output.len() as u64)
+            .body(Body::from(self.output.clone()))
+            .unwrap()
+    }
+
     /// Turn a byte-array service response into a `AfterBodyError`-wrapped version of the given error
     pub fn body_err(&self, err: ProstTwirpError) -> ProstTwirpError {
         ProstTwirpError::AfterBodyError {
@@ -308,6 +317,10 @@ impl<T: Message + Default + 'static> ServiceResponse<T> {
     /// Turn a protobuf service response into a hyper response
     pub fn to_hyper_proto(&self) -> Result<Response<Vec<u8>>, ProstTwirpError> {
         self.to_proto_raw().map(|v| v.to_hyper_raw())
+    }
+
+    pub fn to_hyper_body_proto(&self) -> Result<Response<Body>, ProstTwirpError> {
+        self.to_proto_raw().map(|v| v.to_hyper_body_raw())
     }
 }
 
