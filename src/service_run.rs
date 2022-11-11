@@ -41,7 +41,7 @@ pub struct ServiceRequest<T> {
     ///
     /// Should always at least have `Content-Type`. Clients will override `Content-Length` on serialization.
     pub headers: HeaderMap,
-    // The serialized request object
+    // The request body: this may be either a proto `Message` or the serialized bytes.
     pub input: T,
 }
 
@@ -613,11 +613,9 @@ impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
             // Ug: https://github.com/tokio-rs/tokio-service/issues/9
             let service = self.service.clone();
             Box::pin(async move {
-                service
-                    .handle(ServiceRequest::from_hyper_raw(req))
-                    .await
-                    .map(|v| v.to_hyper_raw())
-                    .or_else(|err| match err.root_err() {
+                match service.handle(ServiceRequest::from_hyper_raw(req)).await {
+                    Ok(resp) => Ok(resp.to_hyper_raw()),
+                    Err(err) => match err.root_err() {
                         ProstTwirpError::ProstDecodeError(_) => Ok(TwirpError::new(
                             StatusCode::BAD_REQUEST,
                             "protobuf_decode_err",
@@ -630,10 +628,11 @@ impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
                         _ => Ok(TwirpError::new(
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "internal_err",
-                            "Internal Error",
+                            "Internal error",
                         )
                         .to_hyper_resp()),
-                    })
+                    },
+                }
             })
         }
     }
