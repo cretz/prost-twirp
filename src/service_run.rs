@@ -1,3 +1,10 @@
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+use std::future::ready;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+
 use futures::{self, future, Future, TryFutureExt};
 use hyper::client::HttpConnector;
 use hyper::header::HeaderMap;
@@ -7,13 +14,6 @@ use hyper::service::Service;
 use hyper::{self, http};
 use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri, Version};
 use prost::{DecodeError, EncodeError, Message};
-use serde_json;
-use std::error::Error;
-use std::fmt::{self, Display, Formatter};
-use std::future::ready;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 
 pub type FutReq<T> = Box<dyn Future<Output = Result<ServiceRequest<T>, ProstTwirpError>>>;
 
@@ -23,8 +23,8 @@ pub type PTReq<I> = ServiceRequest<I>;
 /// The type of every service response
 pub type PTRes<O> = Pin<Box<dyn Future<Output = Result<ServiceResponse<O>, ProstTwirpError>>>>;
 
-static JSON_CONTENT_TYPE: &'static str = "application/json";
-static PROTOBUF_CONTENT_TYPE: &'static str = "application/protobuf";
+static JSON_CONTENT_TYPE: &str = "application/json";
+static PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
 
 /// A request with HTTP info and the serialized input object
 #[derive(Debug)]
@@ -59,7 +59,7 @@ impl<T> ServiceRequest<T> {
             uri: Default::default(),
             method: Method::POST,
             version: Version::default(),
-            headers: headers,
+            headers,
             input,
         }
     }
@@ -103,7 +103,7 @@ impl ServiceRequest<Vec<u8>> {
     ) -> Result<ServiceRequest<Vec<u8>>, ProstTwirpError> {
         let uri = req.uri().clone();
         let method = req.method().clone();
-        let version = req.version().clone();
+        let version = req.version();
         let headers = req.headers().clone();
         let input = hyper::body::to_bytes(req.into_body()).await?.to_vec();
         Ok(ServiceRequest {
@@ -205,7 +205,7 @@ impl<T> ServiceResponse<T> {
         );
         ServiceResponse {
             version: Version::default(),
-            headers: headers,
+            headers,
             status: StatusCode::OK,
             output,
         }
@@ -236,7 +236,7 @@ impl ServiceResponse<Vec<u8>> {
         let status = resp.status();
         let output = hyper::body::to_bytes(resp.into_body())
             .await
-            .map_err(|e| ProstTwirpError::HyperError(e))?
+            .map_err(ProstTwirpError::HyperError)?
             .to_vec();
         // TODO: Maybe the response should just hold Bytes.
         Ok(ServiceResponse {
@@ -403,7 +403,7 @@ impl TwirpError {
             msg: json["msg"].as_str().unwrap_or("<no message>").to_string(),
             // Put the whole thing as meta if there was no type
             meta: if error_type.is_some() {
-                json.get("meta").map(|v| v.clone())
+                json.get("meta").cloned()
             } else {
                 Some(json.clone())
             },
@@ -586,7 +586,7 @@ impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
     }
 
     fn call(&mut self, req: Request<Vec<u8>>) -> Self::Future {
-        if req.method() != &Method::POST {
+        if req.method() != Method::POST {
             Box::pin(future::ok(
                 TwirpError::new(
                     StatusCode::METHOD_NOT_ALLOWED,
