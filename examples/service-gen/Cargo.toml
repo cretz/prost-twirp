@@ -12,11 +12,14 @@ futures = "0.3"
 prost = "0.11"
 prost-derive = "0.11"
 prost-twirp = { path = "../../" }
-tokio-core = "0.1"
 
 [dependencies.hyper]
 version = "0.14"
 features = ["client", "server", "http1", "http2", "tcp"]
+
+[dependencies.tokio]
+version = "1.2"
+features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"]
 
 [build-dependencies]
 prost-build = "0.11"
