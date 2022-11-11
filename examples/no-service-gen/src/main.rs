@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 use std::convert::Infallible;
 use std::env;
 use std::thread;
@@ -6,7 +5,7 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use futures::future;
-use futures::TryFutureExt;
+
 use hyper::http::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Body;
@@ -16,7 +15,7 @@ use hyper::Server;
 use hyper::{Client, Method, StatusCode};
 use prost_twirp::ProstTwirpError;
 use prost_twirp::{
-    HyperClient, HyperServer, HyperService, PTRes, ServiceRequest, ServiceResponse, TwirpError,
+    HyperClient, ServiceRequest, ServiceResponse, TwirpError,
 };
 
 mod service {
