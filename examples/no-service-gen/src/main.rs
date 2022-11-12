@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 use std::env;
-use std::thread;
 use std::time::Duration;
 
 use futures::channel::oneshot;
@@ -8,15 +7,8 @@ use futures::future;
 
 use hyper::http::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::Body;
-use hyper::Request;
-use hyper::Response;
-use hyper::Server;
-use hyper::{Client, Method, StatusCode};
-use prost_twirp::ProstTwirpError;
-use prost_twirp::{
-    HyperClient, ServiceRequest, ServiceResponse, TwirpError,
-};
+use hyper::{Body, Client, Method, Request, Response, Server, StatusCode};
+use prost_twirp::{HyperClient, ProstTwirpError, ServiceRequest, ServiceResponse, TwirpError};
 
 mod service {
     include!(concat!(env!("OUT_DIR"), "/twitch.twirp.example.rs"));
@@ -43,7 +35,7 @@ async fn main() {
         });
         // Wait a sec or forever depending on whether there's client code to run
         if run_client {
-            thread::sleep(Duration::from_millis(1000));
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         } else {
             thread_res.await.unwrap();
         }

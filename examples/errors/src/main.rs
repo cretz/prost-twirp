@@ -32,7 +32,7 @@ fn main() {
         });
         // Wait a sec or forever depending on whether there's client code to run
         if run_client {
-            thread::sleep(Duration::from_millis(1000));
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         } else {
             if let Err(err) = thread_res.join() {
                 println!("Server panicked: {:?}", err);
