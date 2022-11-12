@@ -1,3 +1,5 @@
+use quote::{format_ident, quote};
+
 use prost_build::{Method, Service, ServiceGenerator};
 
 #[derive(Default)]
@@ -20,10 +22,14 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_imports(&self, buf: &mut String) {
+        buf.push_str("// hello!\n");
         buf.push_str(
-            "// use hyper::service::Service;
-            use futures::TryFutureExt;
-        ",
+            quote! {
+                // use hyper::service::Service;
+                use futures::TryFutureExt;
+            }
+            .to_string()
+            .as_str(),
         );
     }
 
@@ -62,18 +68,36 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_main_impl(&self, service: &Service, buf: &mut String) {
-        buf.push_str(&format!(
-            "\n\
-            impl dyn {0} {{\n    \
-                pub fn new_client(client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>, root_url: &str) -> Box<dyn {0}> {{\n        \
-                    Box::new({0}Client({1}::HyperClient::new(client, root_url)))\n    \
-                }}\n    \
-                pub fn new_server<T: 'static + {0}>(v: T) -> Box<dyn (::hyper::service::Service<::hyper::Request<::hyper::body::Body>,\n            \
-                        Response=::hyper::Response<::hyper::body::Body>, Error=::hyper::Error, Future=Box<dyn (::futures::Future<Output=::hyper::Response<::hyper::body::Body>>)>>)> {{\n        \
-                    Box::new({1}::HyperServer::new({0}Server(::std::sync::Arc::new(v))))\n    \
-                }}\n\
-            }}\n",
-            service.name, self.prost_twirp_mod()));
+        let service_name = format_ident!("{}", &service.name);
+        let client_name = format_ident!("{}Client", &service.name);
+        let server_name = format_ident!("{}Server", &service.name);
+        let mod_name = format_ident!("prost_twirp");
+        let mod_path = if self.embed_client {
+            quote! { crate::#mod_name }
+        } else {
+            quote! { ::#mod_name }
+        };
+        let s = quote! {
+            impl dyn #service_name {
+                pub fn new_client(
+                        client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>,
+                        root_url: &str)
+                    -> Box<dyn #service_name> {
+                    Box::new(#client_name(#mod_path::HyperClient::new(client, root_url)))
+                }
+
+                pub fn new_server<T: 'static + #service_name>(v: T)
+                    -> Box<dyn (::hyper::service::Service<::hyper::Request<::hyper::body::Body>,
+                        Response=::hyper::Response<::hyper::body::Body>,
+                        Error=::hyper::Error,
+                        Future=Box<dyn (::futures::Future<Output=::hyper::Response<::hyper::body::Body>>)>>)> {
+                    Box::new(#mod_path::HyperServer::new(#server_name(::std::sync::Arc::new(v))))
+                }
+            }
+        }
+        .to_string();
+        println!("{s}");
+        buf.push_str(&s);
     }
 
     fn generate_client_struct(&self, service: &Service, buf: &mut String) {
