@@ -76,9 +76,7 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>, ProstTwirpError> {
     }
     match req.uri().path() {
         "/twirp/twitch.twirp.example.Haberdasher/MakeHat" => {
-            let size: service::Size = ServiceRequest::from_hyper_body_proto_request(req)
-                .await?
-                .input;
+            let size: service::Size = ServiceRequest::from_hyper_request(req).await?.input;
             ServiceResponse::new(service::Hat {
                 size: size.inches,
                 color: "blue".to_string(),

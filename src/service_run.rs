@@ -7,11 +7,9 @@ use std::task::{Context, Poll};
 
 use futures::{self, future, Future, TryFutureExt};
 use hyper::client::HttpConnector;
-use hyper::header::HeaderMap;
-use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use hyper::http::HeaderValue;
+use hyper::header::{HeaderMap, CONTENT_LENGTH, CONTENT_TYPE};
+use hyper::http::{self, HeaderValue};
 use hyper::service::Service;
-use hyper::{self, http};
 use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri, Version};
 use prost::{DecodeError, EncodeError, Message};
 
@@ -28,7 +26,7 @@ static PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
 
 /// A request with HTTP info and the serialized input object
 #[derive(Debug)]
-pub struct ServiceRequest<T> {
+pub struct ServiceRequest<T: Message> {
     /// The URI of the original request
     ///
     /// When using a client, this will be overridden with the proper URI. It is only valuable for servers.
@@ -41,11 +39,11 @@ pub struct ServiceRequest<T> {
     ///
     /// Should always at least have `Content-Type`. Clients will override `Content-Length` on serialization.
     pub headers: HeaderMap,
-    // The request body: this may be either a proto `Message` or the serialized bytes.
+    // The request body as a proto `Message`.
     pub input: T,
 }
 
-impl<T> ServiceRequest<T> {
+impl<T: Message> ServiceRequest<T> {
     /// Create new service request with the given input object
     ///
     /// This automatically sets the `Content-Type` header as `application/protobuf`.
@@ -65,7 +63,7 @@ impl<T> ServiceRequest<T> {
     }
 
     /// Copy this request with a different input value
-    pub fn clone_with_input<U>(&self, input: U) -> ServiceRequest<U> {
+    pub fn clone_with_input(&self, input: T) -> ServiceRequest<T> {
         ServiceRequest {
             uri: self.uri.clone(),
             method: self.method.clone(),
@@ -82,98 +80,46 @@ impl<T: Message + Default + 'static> From<T> for ServiceRequest<T> {
     }
 }
 
-impl ServiceRequest<Vec<u8>> {
-    /// Turn a hyper request to a boxed future of a byte-array service request
-    pub fn from_hyper_raw(req: Request<Vec<u8>>) -> Self {
-        let uri = req.uri().clone();
-        let method = req.method().clone();
-        let version = req.version();
-        let headers = req.headers().clone();
-        ServiceRequest {
-            uri,
-            method,
-            version,
-            headers,
-            input: req.into_body(),
-        }
-    }
-
-    pub async fn from_hyper_body_request(
-        req: Request<Body>,
-    ) -> Result<ServiceRequest<Vec<u8>>, ProstTwirpError> {
-        let uri = req.uri().clone();
-        let method = req.method().clone();
-        let version = req.version();
-        let headers = req.headers().clone();
-        let input = hyper::body::to_bytes(req.into_body()).await?.to_vec();
-        Ok(ServiceRequest {
-            uri,
-            method,
-            version,
-            headers,
-            input,
-        })
-    }
-
-    /// Turn a byte-array service request into a hyper request
-    pub fn to_hyper_raw(&self) -> Request<Body> {
+impl<T: Message + Default + 'static> ServiceRequest<T> {
+    /// Serialize into a hyper request.
+    pub fn to_hyper_request(&self) -> Result<Request<Body>, ProstTwirpError> {
+        let mut body = Vec::new();
+        self.input
+            .encode(&mut body)
+            .map_err(|err| ProstTwirpError::ProstEncodeError(err))?;
         let mut builder = Request::post(self.uri.clone());
         builder.headers_mut().unwrap().clone_from(&self.headers);
         builder
-            .header(CONTENT_LENGTH, self.input.len() as u64)
-            .body(Body::from(self.input.clone()))
-            .unwrap()
+            .header(CONTENT_LENGTH, body.len() as u64)
+            .body(Body::from(body))
+            .map_err(|err| ProstTwirpError::from(err))
     }
 
-    /// Turn a byte-array service request into a `AfterBodyError`-wrapped version of the given error
-    pub fn body_err(&self, err: ProstTwirpError) -> ProstTwirpError {
-        ProstTwirpError::AfterBodyError {
-            body: self.input.clone(),
-            method: Some(self.method.clone()),
-            version: self.version,
-            headers: self.headers.clone(),
-            status: None,
-            err: Box::new(err),
-        }
-    }
-
-    /// Serialize the byte-array service request into a protobuf service request
-    pub fn to_proto<T: Message + Default + 'static>(
-        &self,
-    ) -> Result<ServiceRequest<T>, ProstTwirpError> {
-        match T::decode(&*self.input) {
-            Ok(v) => Ok(self.clone_with_input(v)),
-            Err(err) => Err(self.body_err(ProstTwirpError::ProstDecodeError(err))),
-        }
-    }
-}
-
-impl<T: Message + Default + 'static> ServiceRequest<T> {
-    /// Turn a protobuf service request into a byte-array service request
-    pub fn to_proto_raw(&self) -> Result<ServiceRequest<Vec<u8>>, ProstTwirpError> {
-        let mut body = Vec::new();
-        if let Err(err) = self.input.encode(&mut body) {
-            Err(ProstTwirpError::ProstEncodeError(err))
-        } else {
-            Ok(self.clone_with_input(body))
-        }
-    }
-
-    /// Turn a hyper request into a protobuf service request
-    pub fn from_hyper_proto(req: Request<Vec<u8>>) -> FutReq<T> {
-        Box::new(ready(ServiceRequest::from_hyper_raw(req).to_proto()))
-    }
-
-    pub async fn from_hyper_body_proto_request(
+    pub async fn from_hyper_request(
         req: Request<Body>,
     ) -> Result<ServiceRequest<T>, ProstTwirpError> {
-        let req = ServiceRequest::from_hyper_body_request(req).await?;
-        req.to_proto()
-    }
-
-    /// Turn a protobuf service request into a hyper request
-    pub fn to_hyper_proto(&self) -> Result<Request<Body>, ProstTwirpError> {
-        self.to_proto_raw().map(|v| v.to_hyper_raw())
+        let uri = req.uri().clone();
+        let method = req.method().clone();
+        let version = req.version();
+        let headers = req.headers().clone();
+        let body_bytes = hyper::body::to_bytes(req.into_body()).await?;
+        match T::decode(body_bytes.clone()) {
+            Ok(input) => Ok(ServiceRequest {
+                uri,
+                method,
+                version,
+                headers,
+                input,
+            }),
+            Err(err) => Err(ProstTwirpError::AfterBodyError {
+                status: None,
+                method: Some(method),
+                version,
+                headers,
+                err: Box::new(ProstTwirpError::ProstDecodeError(err)),
+                body: body_bytes.to_vec(),
+            }),
+        }
     }
 }
 
@@ -465,6 +411,8 @@ pub enum ProstTwirpError {
     ProstDecodeError(DecodeError),
     /// A generic hyper error
     HyperError(hyper::Error),
+    /// A HTTP protocol error
+    HttpError(http::Error),
     /// An invalid URI.
     InvalidUri(http::uri::InvalidUri),
     /// A wrapper for any of the other `ProstTwirpError`s that also includes request/response info
@@ -497,6 +445,12 @@ impl ProstTwirpError {
 impl From<hyper::Error> for ProstTwirpError {
     fn from(v: hyper::Error) -> ProstTwirpError {
         ProstTwirpError::HyperError(v)
+    }
+}
+
+impl From<http::Error> for ProstTwirpError {
+    fn from(v: http::Error) -> ProstTwirpError {
+        ProstTwirpError::HttpError(v)
     }
 }
 
@@ -538,7 +492,7 @@ impl HyperClient {
             Ok(v) => v,
         };
         // Build the request
-        let mut hyper_req = match req.to_hyper_proto() {
+        let mut hyper_req = match req.to_hyper_request() {
             Err(err) => return Box::pin(ready(Err(err))),
             Ok(v) => v,
         };
@@ -576,8 +530,8 @@ impl<T: 'static + HyperService> HyperServer<T> {
     }
 }
 
-impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
-    type Response = Response<Vec<u8>>;
+impl<T: 'static + HyperService> Service<Request<Body>> for HyperServer<T> {
+    type Response = Response<Body>;
     type Error = hyper::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
@@ -585,7 +539,7 @@ impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Vec<u8>>) -> Self::Future {
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
         if req.method() != Method::POST {
             Box::pin(future::ok(
                 TwirpError::new(
@@ -593,7 +547,7 @@ impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
                     "bad_method",
                     "Method must be POST",
                 )
-                .to_hyper_resp(),
+                .to_hyper_body_resp(),
             ))
         } else if req
             .headers()
@@ -607,22 +561,25 @@ impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
                     "bad_content_type",
                     "Content type must be application/protobuf",
                 )
-                .to_hyper_resp(),
+                .to_hyper_body_resp(),
             ))
         } else {
             // Ug: https://github.com/tokio-rs/tokio-service/issues/9
             let service = self.service.clone();
             Box::pin(async move {
-                match service.handle(ServiceRequest::from_hyper_raw(req)).await {
-                    Ok(resp) => Ok(resp.to_hyper_raw()),
+                match ServiceRequest::from_hyper_request(req)
+                    .and_then(|req| service.handle(req))
+                    .await
+                {
+                    Ok(resp) => Ok(resp.to_hyper_body_raw()),
                     Err(err) => match err.root_err() {
                         ProstTwirpError::ProstDecodeError(_) => Ok(TwirpError::new(
                             StatusCode::BAD_REQUEST,
                             "protobuf_decode_err",
                             "Invalid protobuf body",
                         )
-                        .to_hyper_resp()),
-                        ProstTwirpError::TwirpError(err) => Ok(err.to_hyper_resp()),
+                        .to_hyper_body_resp()),
+                        ProstTwirpError::TwirpError(err) => Ok(err.to_hyper_body_resp()),
                         // Just propagate hyper errors
                         ProstTwirpError::HyperError(err) => Err(err),
                         _ => Ok(TwirpError::new(
@@ -630,7 +587,7 @@ impl<T: 'static + HyperService> Service<Request<Vec<u8>>> for HyperServer<T> {
                             "internal_err",
                             "Internal error",
                         )
-                        .to_hyper_resp()),
+                        .to_hyper_body_resp()),
                     },
                 }
             })
