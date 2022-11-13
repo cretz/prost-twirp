@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 
 use futures::{future, Future, TryFutureExt};
 use hyper::client::HttpConnector;
-use hyper::header::{HeaderMap, CONTENT_LENGTH, CONTENT_TYPE};
+use hyper::header::{HeaderMap, ALLOW, CONTENT_LENGTH, CONTENT_TYPE};
 use hyper::http::{self, HeaderValue};
 use hyper::service::Service;
 use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri, Version};
@@ -86,13 +86,13 @@ impl<T: Message + Default + 'static> ServiceRequest<T> {
         let mut body = Vec::new();
         self.input
             .encode(&mut body)
-            .map_err(|err| ProstTwirpError::ProstEncodeError(err))?;
+            .map_err(ProstTwirpError::ProstEncodeError)?;
         let mut builder = Request::post(self.uri.clone());
         builder.headers_mut().unwrap().clone_from(&self.headers);
         builder
             .header(CONTENT_LENGTH, body.len() as u64)
             .body(Body::from(body))
-            .map_err(|err| ProstTwirpError::from(err))
+            .map_err(ProstTwirpError::from)
     }
 
     pub async fn from_hyper_request(
@@ -260,8 +260,12 @@ impl TwirpError {
             .status(self.status)
             .header(CONTENT_TYPE, JSON_CONTENT_TYPE)
             .header(CONTENT_LENGTH, HeaderValue::from(body_len))
+            .header(ALLOW, HeaderValue::from_static("POST"))
             .body(Body::from(body_bytes))
-            .unwrap()
+            .expect("failed to serialize twirp error")
+        // The potential panic here is not desirable but it seems highly
+        // unlikely that we fail to serialize a body from a simple string
+        // like this.
     }
 
     /// Create error from Serde JSON value
