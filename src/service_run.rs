@@ -256,12 +256,12 @@ impl TwirpError {
             .to_json_bytes()
             .unwrap_or_else(|_| "{}".as_bytes().to_vec());
         let body_len = body_bytes.len() as u64;
-        let body = Body::from(body_bytes);
-        let builder = Response::builder()
+        Response::builder()
             .status(self.status)
             .header(CONTENT_TYPE, JSON_CONTENT_TYPE)
-            .header(CONTENT_LENGTH, HeaderValue::from(body_len));
-        builder.body(body).unwrap()
+            .header(CONTENT_LENGTH, HeaderValue::from(body_len))
+            .body(Body::from(body_bytes))
+            .unwrap()
     }
 
     /// Create error from Serde JSON value
