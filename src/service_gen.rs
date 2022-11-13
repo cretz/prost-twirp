@@ -1,6 +1,8 @@
-use quote::{format_ident, quote};
+//! Generate service code from a service definition.
 
+use proc_macro2::TokenStream;
 use prost_build::{Method, Service, ServiceGenerator};
+use quote::{format_ident, quote};
 
 #[derive(Default)]
 pub struct TwirpServiceGenerator {
@@ -22,11 +24,15 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_imports(&self, buf: &mut String) {
-        buf.push_str("// hello!\n");
+        let mod_path = self.prost_twirp_path();
         buf.push_str(
             quote! {
-                // use hyper::service::Service;
-                use futures::TryFutureExt;
+                use std::pin::Pin;
+                use std::sync::Arc;
+
+                use futures::{self, future, Future, TryFutureExt};
+                use hyper::{Request, Response, Body};
+                use #mod_path::{ProstTwirpError};
             }
             .to_string()
             .as_str(),
@@ -67,18 +73,38 @@ impl TwirpServiceGenerator {
         )
     }
 
-    fn generate_main_impl(&self, service: &Service, buf: &mut String) {
-        let service_name = format_ident!("{}", &service.name);
-        let client_name = format_ident!("{}Client", &service.name);
-        let server_name = format_ident!("{}Server", &service.name);
+    fn service_name_ident(&self, service: &Service) -> proc_macro2::Ident {
+        format_ident!("{}", service.name)
+    }
+
+    fn client_name_ident(&self, service: &Service) -> proc_macro2::Ident {
+        format_ident!("{}Client", &service.name)
+    }
+
+    fn server_name_ident(&self, service: &Service) -> proc_macro2::Ident {
+        format_ident!("{}Server", &service.name)
+    }
+
+    fn prost_twirp_path(&self) -> proc_macro2::TokenStream {
         let mod_name = format_ident!("prost_twirp");
-        let mod_path = if self.embed_client {
+        if self.embed_client {
             quote! { crate::#mod_name }
         } else {
             quote! { ::#mod_name }
-        };
+        }
+    }
+
+    fn generate_main_impl(&self, service: &Service, buf: &mut String) {
+        let service_name = self.service_name_ident(service);
+        let client_name = self.client_name_ident(service);
+        let server_name = self.server_name_ident(service);
+        let mod_path = self.prost_twirp_path();
         let s = quote! {
             impl dyn #service_name {
+                /// Construct a new client stub for the service.
+                ///
+                /// The client's implementation of the trait methods will make HTTP requests to the
+                /// server addressed by `client`.
                 pub fn new_client(
                         client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>,
                         root_url: &str)
@@ -86,11 +112,17 @@ impl TwirpServiceGenerator {
                     Box::new(#client_name(#mod_path::HyperClient::new(client, root_url)))
                 }
 
+                /// Make a new server for the service.
+                ///
+                /// Method calls are forwarded to the implementation in `v`.
                 pub fn new_server<T: 'static + #service_name>(v: T)
-                    -> Box<dyn (::hyper::service::Service<::hyper::Request<::hyper::body::Body>,
-                        Response=::hyper::Response<::hyper::body::Body>,
-                        Error=::hyper::Error,
-                        Future=Box<dyn (::futures::Future<Output=::hyper::Response<::hyper::body::Body>>)>>)> {
+                    -> Box<dyn (::hyper::service::Service<
+                            ::hyper::Request<Body>,
+                            Response=::hyper::Response<Body>,
+                            Error=::hyper::Error,
+                            Future=Pin<Box<dyn (Future<Output=Result<Response<Body>, ::hyper::Error>>)>>
+                            >)>
+                         {
                     Box::new(#mod_path::HyperServer::new(#server_name(::std::sync::Arc::new(v))))
                 }
             }
@@ -132,29 +164,55 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_server_impl(&self, service: &Service, buf: &mut String) {
-        buf.push_str(&format!(
-            "\n\
-            impl<T: 'static + {0}> {1}::HyperService for {0}Server<T> {{\n    \
-                fn handle(&self, req: {1}::ServiceRequest<Vec<u8>>) -> {1}::PTRes<Vec<u8>> {{\n        \
-                    let static_service = self.0.clone();\n        \
-                    match (req.method.clone(), req.uri.path()) {{",
-            service.name, self.prost_twirp_mod()));
-        // Make match arms for each type
-        for method in service.methods.iter() {
-            buf.push_str(&format!(
-                "\n            \
-                (::hyper::Method::POST, \"/twirp/{}.{}/{}\") =>\n                \
-                    Box::pin(::futures::future::ready(req.to_proto()).and_then(move |v| static_service.{}(v)).and_then(|v| v.to_proto_raw())),",
-                service.package, service.proto_name, method.proto_name, method.name));
+        let service_name = self.service_name_ident(service);
+        let server_name = self.server_name_ident(service);
+        let mod_path = self.prost_twirp_path();
+        let match_arms: Vec<_> = service
+            .methods
+            .iter()
+            .map(|method| self.method_server_impl_match_case(service, method))
+            .collect();
+        // TODO: Maybe no need to check the method if it's checked in the higher-level layer?
+        // Or, if we do, check the content type too?
+        // Or maybe check in from_hyper_request?
+        let handle_method = quote! {
+            fn handle(&self, req: hyper::Request<hyper::Body>)
+                -> Pin<Box<dyn Future<Output = Result<Response<Body>, ProstTwirpError>>>> {
+                let static_service = Arc::clone(&self.0);
+                match (req.method().clone(), req.uri().path()) {
+                    #(#match_arms),*
+                    _ => Box::pin(::futures::future::ok(
+                        // TODO: Specific NotFound error in the library?
+                        #mod_path::TwirpError::new(
+                            ::hyper::StatusCode::NOT_FOUND,
+                            "not_found",
+                            "Not found")
+                        .to_hyper_response()))
+                }
+            }
+        };
+        let service_impl = quote! {
+            impl<T: 'static + #service_name> #mod_path::HyperService for #server_name<T> {
+                #handle_method
+            }
+        };
+        buf.push_str(service_impl.to_string().as_str());
+    }
+
+    fn method_server_impl_match_case(&self, service: &Service, method: &Method) -> TokenStream {
+        let path = format!(
+            "/twirp/{}.{}/{}",
+            service.package, service.proto_name, method.proto_name
+        );
+        let method_name = format_ident!("{}", method.name);
+        let mod_path = self.prost_twirp_path();
+        quote! {
+            (::hyper::Method::POST, #path) =>
+                Box::pin(
+                    #mod_path::ServiceRequest::from_hyper_request(req)
+                        .and_then(move |v| static_service.#method_name(v))
+                        .and_then(|v| future::ready(v.to_hyper_response()))),
         }
-        // Final 404 arm and end fn
-        buf.push_str(&format!(
-            "\n            \
-                        _ => Box::new(::futures::future::ok({0}::TwirpError::new(::hyper::StatusCode::NOT_FOUND, \"not_found\", \"Not found\").to_resp_raw()))\n        \
-                    }}\n    \
-                }}\n\
-            }}",
-            self.prost_twirp_mod()));
     }
 }
 
