@@ -172,14 +172,11 @@ impl TwirpServiceGenerator {
             .iter()
             .map(|method| self.method_server_impl_match_case(service, method))
             .collect();
-        // TODO: Maybe no need to check the method if it's checked in the higher-level layer?
-        // Or, if we do, check the content type too?
-        // Or maybe check in from_hyper_request?
         let handle_method = quote! {
             fn handle(&self, req: hyper::Request<hyper::Body>)
                 -> Pin<Box<dyn Future<Output = Result<Response<Body>, ProstTwirpError>>>> {
                 let static_service = Arc::clone(&self.0);
-                match (req.method().clone(), req.uri().path()) {
+                match req.uri().path() {
                     #(#match_arms),*
                     _ => Box::pin(::futures::future::ok(
                         // TODO: Specific NotFound error in the library?
@@ -207,11 +204,10 @@ impl TwirpServiceGenerator {
         let method_name = format_ident!("{}", method.name);
         let mod_path = self.prost_twirp_path();
         quote! {
-            (::hyper::Method::POST, #path) =>
-                Box::pin(
-                    #mod_path::ServiceRequest::from_hyper_request(req)
-                        .and_then(move |v| static_service.#method_name(v))
-                        .and_then(|v| future::ready(v.to_hyper_response()))),
+            #path => Box::pin(
+                #mod_path::ServiceRequest::from_hyper_request(req)
+                    .and_then(move |v| static_service.#method_name(v))
+                    .and_then(|v| future::ready(v.to_hyper_response()))),
         }
     }
 }
