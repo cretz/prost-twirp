@@ -339,6 +339,10 @@ pub enum ProstTwirpError {
     HttpError(http::Error),
     /// An invalid URI.
     InvalidUri(http::uri::InvalidUri),
+    /// The HTTP Method was not `POST`.
+    InvalidMethod,
+    /// The request content type was not `application/protobuf`.
+    InvalidContentType,
     /// A wrapper for any of the other `ProstTwirpError`s that also includes request/response info
     AfterBodyError {
         /// The request or response's raw body before the error happened
@@ -367,14 +371,24 @@ impl ProstTwirpError {
 
     pub fn into_hyper_response(self) -> Result<Response<Body>, hyper::Error> {
         let external_err = match self {
+            ProstTwirpError::TwirpError(err) => err,
+            // Just propagate hyper errors
+            ProstTwirpError::HyperError(err) => return Err(err),
+            ProstTwirpError::InvalidMethod => TwirpError::new(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "bad_method",
+                "Method must be POST",
+            ),
             ProstTwirpError::ProstDecodeError(_) => TwirpError::new(
                 StatusCode::BAD_REQUEST,
                 "protobuf_decode_err",
                 "Invalid protobuf body",
             ),
-            ProstTwirpError::TwirpError(err) => err,
-            // Just propagate hyper errors
-            ProstTwirpError::HyperError(err) => return Err(err),
+            ProstTwirpError::InvalidContentType => TwirpError::new(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "bad_content_type",
+                "Content type must be application/protobuf",
+            ),
             _ => TwirpError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_err",
@@ -510,26 +524,17 @@ impl<T: 'static + HyperService> Service<Request<Body>> for HyperServer<T> {
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        // self.call_inner(req).await;
         if req.method() != Method::POST {
-            Box::pin(future::ok(
-                TwirpError::new(
-                    StatusCode::METHOD_NOT_ALLOWED,
-                    "bad_method",
-                    "Method must be POST",
-                )
-                .to_hyper_response(),
+            Box::pin(future::ready(
+                ProstTwirpError::InvalidMethod.into_hyper_response(),
             ))
-        } else if req.headers().get(CONTENT_TYPE)
-            == Some(HeaderValue::from_static(JSON_CONTENT_TYPE)).as_ref()
+        } else if req
+            .headers()
+            .get(CONTENT_TYPE)
+            .map_or(true, |v| v != PROTOBUF_CONTENT_TYPE)
         {
-            Box::pin(future::ok(
-                TwirpError::new(
-                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    "bad_content_type",
-                    "Content type must be application/protobuf",
-                )
-                .to_hyper_response(),
+            Box::pin(future::ready(
+                ProstTwirpError::InvalidContentType.into_hyper_response(),
             ))
         } else {
             // Ug: https://github.com/tokio-rs/tokio-service/issues/9
