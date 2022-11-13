@@ -418,7 +418,20 @@ impl Display for ProstTwirpError {
 }
 
 impl Error for ProstTwirpError {
-    // TODO: implement `source`.
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            ProstTwirpError::TwirpError(err) => Some(err),
+            ProstTwirpError::JsonDecodeError(err) => Some(err),
+            ProstTwirpError::ProstEncodeError(err) => Some(err),
+            ProstTwirpError::ProstDecodeError(err) => Some(err),
+            ProstTwirpError::HyperError(err) => Some(err),
+            ProstTwirpError::HttpError(err) => Some(err),
+            ProstTwirpError::InvalidUri(err) => Some(err),
+            ProstTwirpError::InvalidMethod => None,
+            ProstTwirpError::InvalidContentType => None,
+            ProstTwirpError::AfterBodyError { err, .. } => Some(err),
+        }
+    }
 }
 
 /// A wrapper for a hyper client
