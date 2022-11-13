@@ -15,14 +15,6 @@ impl TwirpServiceGenerator {
         Default::default()
     }
 
-    fn prost_twirp_mod(&self) -> &str {
-        if self.embed_client {
-            "prost_twirp"
-        } else {
-            "::prost_twirp"
-        }
-    }
-
     fn generate_imports(&self, buf: &mut String) {
         let mod_path = self.prost_twirp_path();
         buf.push_str(
@@ -94,6 +86,14 @@ impl TwirpServiceGenerator {
         }
     }
 
+    fn prost_twirp_mod(&self) -> &str {
+        if self.embed_client {
+            "prost_twirp"
+        } else {
+            "::prost_twirp"
+        }
+    }
+
     fn generate_main_impl(&self, service: &Service, buf: &mut String) {
         let service_name = self.service_name_ident(service);
         let client_name = self.client_name_ident(service);
@@ -144,13 +144,11 @@ impl TwirpServiceGenerator {
         buf.push_str(&format!("\nimpl {0} for {0}Client {{", service.name));
         for method in service.methods.iter() {
             buf.push_str(&format!(
-                "\n    {} {{\n        \
-                    self.0.go(\"/twirp/{}.{}/{}\", i)\n    \
+                "\n    {method_sig} {{\n        \
+                    self.0.go(\"{url}\", i)\n    \
                 }}\n",
-                self.method_sig(method),
-                service.package,
-                service.proto_name,
-                method.proto_name
+                method_sig = self.method_sig(method),
+                url = self.method_url(service, method)
             ));
         }
         buf.push_str("}\n");
@@ -197,10 +195,7 @@ impl TwirpServiceGenerator {
     }
 
     fn method_server_impl_match_case(&self, service: &Service, method: &Method) -> TokenStream {
-        let path = format!(
-            "/twirp/{}.{}/{}",
-            service.package, service.proto_name, method.proto_name
-        );
+        let path = self.method_url(service, method);
         let method_name = format_ident!("{}", method.name);
         let mod_path = self.prost_twirp_path();
         quote! {
@@ -209,6 +204,13 @@ impl TwirpServiceGenerator {
                     .and_then(move |v| static_service.#method_name(v))
                     .and_then(|v| future::ready(v.to_hyper_response()))),
         }
+    }
+
+    fn method_url(&self, service: &Service, method: &Method) -> String {
+        format!(
+            "/twirp/{}/{}.{}",
+            service.package, service.proto_name, method.proto_name
+        )
     }
 }
 
