@@ -68,7 +68,7 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>, ProstTwirpError> {
             "method_not_allowed",
             "Only POST",
         )
-        .to_hyper_body_resp();
+        .to_hyper_response();
         response
             .headers_mut()
             .insert("Allow", HeaderValue::from_static("POST"));
@@ -82,10 +82,10 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>, ProstTwirpError> {
                 color: "blue".to_string(),
                 name: "fedora".to_string(),
             })
-            .to_hyper_body_proto()
+            .to_hyper_response()
         }
         _ => Ok(
-            TwirpError::new(StatusCode::NOT_FOUND, "not_found", "Not found").to_hyper_body_resp(),
+            TwirpError::new(StatusCode::NOT_FOUND, "not_found", "Not found").to_hyper_response(),
         ),
     }
 }
