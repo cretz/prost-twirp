@@ -7,7 +7,6 @@ use quote::{format_ident, quote};
 #[derive(Default)]
 pub struct TwirpServiceGenerator {
     pub embed_client: bool,
-    type_aliases_generated: bool,
 }
 
 impl TwirpServiceGenerator {
@@ -24,23 +23,12 @@ impl TwirpServiceGenerator {
 
                 use futures::{self, future, Future, TryFutureExt};
                 use hyper::{Request, Response, Body};
+
                 use #mod_path::{ProstTwirpError};
             }
             .to_string()
             .as_str(),
         );
-    }
-
-    fn generate_type_aliases(&mut self, buf: &mut String) {
-        if !self.type_aliases_generated {
-            self.type_aliases_generated = true;
-            buf.push_str(&format!(
-                "\n\
-                pub type PTReq<I> = {0}::PTReq<I>;\n\
-                pub type PTRes<O> = {0}::PTRes<O>;\n",
-                self.prost_twirp_mod()
-            ));
-        }
     }
 
     fn generate_main_trait(&self, service: &Service, buf: &mut String) {
@@ -80,7 +68,7 @@ impl TwirpServiceGenerator {
     fn prost_twirp_path(&self) -> proc_macro2::TokenStream {
         let mod_name = format_ident!("prost_twirp");
         if self.embed_client {
-            quote! { crate::#mod_name }
+            quote! { #mod_name }
         } else {
             quote! { ::#mod_name }
         }
@@ -105,6 +93,7 @@ impl TwirpServiceGenerator {
                 ///
                 /// The client's implementation of the trait methods will make HTTP requests to the
                 /// server addressed by `client`.
+                #[allow(dead_code)]
                 pub fn new_client(
                         client: ::hyper::Client<::hyper::client::HttpConnector, ::hyper::Body>,
                         root_url: &str)
@@ -115,6 +104,7 @@ impl TwirpServiceGenerator {
                 /// Make a new server for the service.
                 ///
                 /// Method calls are forwarded to the implementation in `v`.
+                #[allow(dead_code)]
                 pub fn new_server<T: 'static + #service_name>(v: T)
                     -> Box<dyn (::hyper::service::Service<
                             ::hyper::Request<Body>,
@@ -172,7 +162,7 @@ impl TwirpServiceGenerator {
             .collect();
         let handle_method = quote! {
             fn handle(&self, req: hyper::Request<hyper::Body>)
-                -> Pin<Box<dyn Future<Output = Result<Response<Body>, ProstTwirpError>>>> {
+                -> Pin<Box<dyn Future<Output = Result<Response<Body>, #mod_path::ProstTwirpError>>>> {
                 let static_service = Arc::clone(&self.0);
                 match req.uri().path() {
                     #(#match_arms),*
@@ -217,7 +207,6 @@ impl TwirpServiceGenerator {
 impl ServiceGenerator for TwirpServiceGenerator {
     fn generate(&mut self, service: Service, buf: &mut String) {
         self.generate_imports(buf);
-        self.generate_type_aliases(buf);
         self.generate_main_trait(&service, buf);
         self.generate_main_impl(&service, buf);
         self.generate_client_struct(&service, buf);
