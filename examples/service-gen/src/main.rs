@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use futures::future;
+use futures::TryFutureExt;
 use hyper::server::Server;
 use hyper::service::make_service_fn;
 use hyper::service::service_fn;
@@ -25,13 +26,14 @@ async fn main() {
         let thread_res = tokio::spawn(async {
             println!("Starting server");
             let addr = "0.0.0.0:8080".parse().unwrap();
-            let server = Server::bind(&addr).serve(make_service_fn(|_conn| async {
-                Ok::<_, Infallible>(<dyn service::Haberdasher>::new_server(HaberdasherService))
-            }));
-            let graceful = server.with_graceful_shutdown(async {
-                shutdown_recv.await.ok();
-            });
-            graceful.await.unwrap();
+            let server = Server::bind(&addr)
+                .serve(make_service_fn(|_conn| async {
+                    Ok::<_, Infallible>(<dyn service::Haberdasher>::new_server(HaberdasherService))
+                }))
+                .with_graceful_shutdown(async {
+                    shutdown_recv.await.ok();
+                });
+            server.await.unwrap();
             println!("Server stopped");
         });
         // Wait a sec or forever depending on whether there's client code to run
@@ -42,18 +44,20 @@ async fn main() {
         }
     }
 
-    // if run_client {
-    //     let hyper_client = Client::new();
-    //     let service_client =
-    //         <dyn service::Haberdasher>::new_client(hyper_client, "http://localhost:8080");
-    //     // Run the 5 like the other client
-    //     let work = future::join_all((0..5).map(|_| {
-    //         service_client
-    //             .make_hat(service::Size { inches: 12 }.into())
-    //             .and_then(|res| Ok(println!("Made {:?}", res.output)))
-    //     }));
-    //     shutdown_send.send(()).unwrap();
-    // }
+    if run_client {
+        let hyper_client = Client::new();
+        let service_client =
+            <dyn service::Haberdasher>::new_client(hyper_client, "http://localhost:8080");
+        future::join_all((0..5).map(|_| async {
+            let res = service_client
+                .make_hat(service::Size { inches: 12 }.into())
+                .await
+                .unwrap();
+            println!("Made {:?}", res.output);
+        }))
+        .await;
+        shutdown_send.send(()).unwrap();
+    }
 }
 
 pub struct HaberdasherService;
