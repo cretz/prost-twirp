@@ -13,13 +13,15 @@ use hyper::service::Service;
 use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri, Version};
 use prost::{DecodeError, EncodeError, Message};
 
-pub type FutReq<T> = Box<dyn Future<Output = Result<ServiceRequest<T>, ProstTwirpError>>>;
+pub type FutReq<T> =
+    Box<dyn Future<Output = Result<ServiceRequest<T>, ProstTwirpError>> + Send + 'static>;
 
 /// The type of every service request
 pub type PTReq<I> = ServiceRequest<I>;
 
 /// The type of every service response
-pub type PTRes<O> = Pin<Box<dyn Future<Output = Result<ServiceResponse<O>, ProstTwirpError>>>>;
+pub type PTRes<O> =
+    Pin<Box<dyn Future<Output = Result<ServiceResponse<O>, ProstTwirpError>> + Send + 'static>>;
 
 static JSON_CONTENT_TYPE: &str = "application/json";
 static PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
@@ -502,7 +504,7 @@ pub trait HyperService {
     fn handle(
         &self,
         req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = Result<Response<Body>, ProstTwirpError>>>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Response<Body>, ProstTwirpError>> + Send>>;
 }
 
 /// A wrapper for a [HyperService] trait that keeps a [Arc] version of the
@@ -515,14 +517,14 @@ pub trait HyperService {
 ///
 /// TODO: Perhaps change to a Tower `Layer`, although that would require
 /// another dependency on `tower_layer`.
-pub struct HyperServer<T: 'static + HyperService> {
+pub struct HyperServer<T: HyperService + Send + Sync + 'static> {
     /// The `Arc` version of the service
     ///
     /// Needed because of [hyper Service lifetimes](https://github.com/tokio-rs/tokio-service/issues/9)
     pub service: Arc<T>,
 }
 
-impl<T: 'static + HyperService> HyperServer<T> {
+impl<T: HyperService + Send + Sync + 'static> HyperServer<T> {
     /// Create a new service wrapper for the given impl
     pub fn new(service: T) -> HyperServer<T> {
         HyperServer {
@@ -531,10 +533,10 @@ impl<T: 'static + HyperService> HyperServer<T> {
     }
 }
 
-impl<T: 'static + HyperService> Service<Request<Body>> for HyperServer<T> {
+impl<T: 'static + HyperService + Send + Sync> Service<Request<Body>> for HyperServer<T> {
     type Response = Response<Body>;
     type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = Pin<Box<dyn (Future<Output = Result<Self::Response, Self::Error>>) + Send>>;
 
     fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

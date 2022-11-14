@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+use std::convert::Infallible;
 use std::env;
 use std::thread;
 use std::time::Duration;
@@ -16,28 +17,30 @@ mod service {
 
 #[tokio::main]
 async fn main() {
-    // let run_server = env::args().any(|s| s == "--server");
-    // let run_client = !run_server || env::args().any(|s| s == "--client");
-    // let (shutdown_send, shutdown_recv) = oneshot::channel();
+    let run_server = env::args().any(|s| s == "--server");
+    let run_client = !run_server || env::args().any(|s| s == "--client");
+    let (shutdown_send, shutdown_recv) = oneshot::channel::<()>();
 
-    // if run_server {
-    //     let thread_res = tokio::spawn(async {
-    //         println!("Starting server");
-    //         let addr = "0.0.0.0:8080".parse().unwrap();
-    //         let make_service = make_service_fn(|_conn| async {
-    //             <dyn service::Haberdasher>::new_server(HaberdasherService)
-    //         });
-    //         let server = Server::bind(&addr).serve(make_service);
-    //         // server.await.unwrap();
-    //         println!("Server stopped");
-    //     });
-    //     // Wait a sec or forever depending on whether there's client code to run
-    //     if run_client {
-    //         tokio::time::sleep(Duration::from_millis(1000)).await;
-    //     } else {
-    //         thread_res.await.unwrap();
-    //     }
-    // }
+    if run_server {
+        let thread_res = tokio::spawn(async {
+            println!("Starting server");
+            let addr = "0.0.0.0:8080".parse().unwrap();
+            let server = Server::bind(&addr).serve(make_service_fn(|_conn| async {
+                Ok::<_, Infallible>(<dyn service::Haberdasher>::new_server(HaberdasherService))
+            }));
+            let graceful = server.with_graceful_shutdown(async {
+                shutdown_recv.await.ok();
+            });
+            graceful.await.unwrap();
+            println!("Server stopped");
+        });
+        // Wait a sec or forever depending on whether there's client code to run
+        if run_client {
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+        } else {
+            thread_res.await.unwrap();
+        }
+    }
 
     // if run_client {
     //     let hyper_client = Client::new();
@@ -53,17 +56,16 @@ async fn main() {
     // }
 }
 
-// pub struct HaberdasherService;
-// impl service::Haberdasher for HaberdasherService {
-//     fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
-//         // Box::new(future::ok(
-//         //     service::Hat {
-//         //         size: i.input.inches,
-//         //         color: "blue".to_string(),
-//         //         name: "fedora".to_string(),
-//         //     }
-//         //     .into(),
-//         // ))
-//         todo!()
-//     }
-// }
+pub struct HaberdasherService;
+impl service::Haberdasher for HaberdasherService {
+    fn make_hat(&self, req: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
+        Box::pin(future::ok(
+            service::Hat {
+                size: req.input.inches,
+                color: "blue".to_string(),
+                name: "fedora".to_string(),
+            }
+            .into(),
+        ))
+    }
+}

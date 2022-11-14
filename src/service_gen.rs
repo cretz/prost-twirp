@@ -114,14 +114,18 @@ impl TwirpServiceGenerator {
                 ///
                 /// Method calls are forwarded to the implementation in `v`.
                 #[allow(dead_code)]
-                pub fn new_server<T: 'static + #service_name>(v: T)
-                    -> Box<dyn (::hyper::service::Service<
+                pub fn new_server<T: #service_name + Send + Sync +'static>(v: T)
+                    -> Box<dyn (
+                        ::hyper::service::Service<
                             ::hyper::Request<Body>,
                             Response=::hyper::Response<Body>,
                             Error=::hyper::Error,
-                            Future=Pin<Box<dyn (Future<Output=Result<Response<Body>, ::hyper::Error>>)>>
-                            >)>
-                         {
+                            Future=Pin<Box<
+                                dyn (Future<Output=Result<Response<Body>, ::hyper::Error>>) + Send
+                            >>
+                        >
+                    ) + Send + Sync>
+                {
                     Box::new(#mod_path::HyperServer::new(#server_name(::std::sync::Arc::new(v))))
                 }
             }
@@ -155,7 +159,7 @@ impl TwirpServiceGenerator {
 
     fn generate_server_struct(&self, service: &Service, buf: &mut String) {
         buf.push_str(&format!(
-            "\npub struct {0}Server<T: 'static + {0}>(::std::sync::Arc<T>);\n",
+            "\npub struct {0}Server<T: {0} + Send + Sync + 'static>(::std::sync::Arc<T>);\n",
             service.name
         ));
     }
@@ -171,7 +175,7 @@ impl TwirpServiceGenerator {
             .collect();
         let handle_method = quote! {
             fn handle(&self, req: hyper::Request<hyper::Body>)
-                -> Pin<Box<dyn Future<Output = Result<Response<Body>, #mod_path::ProstTwirpError>>>> {
+                -> Pin<Box<dyn Future<Output = Result<Response<Body>, #mod_path::ProstTwirpError>> + Send + 'static>> {
                 let static_service = Arc::clone(&self.0);
                 match req.uri().path() {
                     #(#match_arms),*
@@ -186,7 +190,7 @@ impl TwirpServiceGenerator {
             }
         };
         let service_impl = quote! {
-            impl<T: 'static + #service_name> #mod_path::HyperService for #server_name<T> {
+            impl<T: #service_name + Send + Sync + 'static> #mod_path::HyperService for #server_name<T> {
                 #handle_method
             }
         };
@@ -198,10 +202,11 @@ impl TwirpServiceGenerator {
         let method_name = format_ident!("{}", method.name);
         let mod_path = self.prost_twirp_path();
         quote! {
-            #path => Box::pin(
-                #mod_path::ServiceRequest::from_hyper_request(req)
-                    .and_then(move |v| static_service.#method_name(v))
-                    .and_then(|v| future::ready(v.to_hyper_response()))),
+            #path => Box::pin( async move {
+                let req = #mod_path::ServiceRequest::from_hyper_request(req).await?;
+                let resp = static_service.#method_name(req).await?;
+                resp.to_hyper_response()
+            }),
         }
     }
 
