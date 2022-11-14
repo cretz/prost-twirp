@@ -31,6 +31,15 @@ impl TwirpServiceGenerator {
         );
     }
 
+    fn generate_type_aliases(&mut self, buf: &mut String) {
+        buf.push_str(&format!(
+            "\n\
+                pub type PTReq<I> = {0}::PTReq<I>;\n\
+                pub type PTRes<O> = {0}::PTRes<O>;\n",
+            self.prost_twirp_mod()
+        ));
+    }
+
     fn generate_main_trait(&self, service: &Service, buf: &mut String) {
         buf.push_str("\n");
         service.comments.append_with_indent(0, buf);
@@ -207,6 +216,7 @@ impl TwirpServiceGenerator {
 impl ServiceGenerator for TwirpServiceGenerator {
     fn generate(&mut self, service: Service, buf: &mut String) {
         self.generate_imports(buf);
+        self.generate_type_aliases(buf);
         self.generate_main_trait(&service, buf);
         self.generate_main_impl(&service, buf);
         self.generate_client_struct(&service, buf);
