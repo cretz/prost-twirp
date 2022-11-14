@@ -113,6 +113,9 @@ impl TwirpServiceGenerator {
                 /// Make a new server for the service.
                 ///
                 /// Method calls are forwarded to the implementation in `v`.
+                ///
+                /// Due to <https://github.com/hyperium/hyper/issues/2051> this can't be directly
+                /// passed to `Service::serve`.
                 #[allow(dead_code)]
                 pub fn new_server<T: #service_name + Send + Sync +'static>(v: T)
                     -> Box<dyn (
