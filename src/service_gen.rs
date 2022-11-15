@@ -183,12 +183,8 @@ impl TwirpServiceGenerator {
                 match req.uri().path() {
                     #(#match_arms),*
                     _ => Box::pin(::futures::future::ok(
-                        // TODO: Specific NotFound error in the library?
-                        #mod_path::TwirpError::new(
-                            ::hyper::StatusCode::NOT_FOUND,
-                            "not_found",
-                            "Not found")
-                        .to_hyper_response()))
+                        #mod_path::ProstTwirpError::NotFound.into_hyper_response().unwrap()
+                    ))
                 }
             }
         };

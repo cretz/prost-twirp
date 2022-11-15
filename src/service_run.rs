@@ -349,6 +349,8 @@ pub enum ProstTwirpError {
     InvalidMethod,
     /// The request content type was not `application/protobuf`.
     InvalidContentType,
+    /// No matching method was found for the request.
+    NotFound,
     /// A wrapper for any of the other `ProstTwirpError`s that also includes request/response info
     AfterBodyError {
         /// The request or response's raw body before the error happened
@@ -395,6 +397,11 @@ impl ProstTwirpError {
                 "bad_content_type",
                 "Content type must be application/protobuf",
             ),
+            ProstTwirpError::NotFound => TwirpError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "The requested method was not found",
+            ),
             _ => TwirpError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_err",
@@ -435,6 +442,7 @@ impl Error for ProstTwirpError {
             ProstTwirpError::InvalidUri(err) => Some(err),
             ProstTwirpError::InvalidMethod => None,
             ProstTwirpError::InvalidContentType => None,
+            ProstTwirpError::NotFound => None,
             ProstTwirpError::AfterBodyError { err, .. } => Some(err),
         }
     }
