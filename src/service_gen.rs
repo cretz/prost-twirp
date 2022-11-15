@@ -15,16 +15,13 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_imports(&self, buf: &mut String) {
-        let mod_path = self.prost_twirp_path();
         buf.push_str(
             quote! {
                 use std::pin::Pin;
                 use std::sync::Arc;
 
-                use futures::{self, future, Future, TryFutureExt};
-                use hyper::{Request, Response, Body};
-
-                use #mod_path::{ProstTwirpError};
+                use futures::{self, Future};
+                use hyper::{Response, Body};
             }
             .to_string()
             .as_str(),
