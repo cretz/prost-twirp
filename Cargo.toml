@@ -26,9 +26,6 @@ version = "0.14"
 features = ["client", "server", "http1", "http2", "tcp"]
 
 [workspace]
-members = [
-    "examples/errors",
-    "examples/no-service-gen",
-    "examples/service-gen",
-    "examples/service-gen-no-runtime",
-]
+members = ["examples/errors", "examples/service-gen"]
+# Exclude these because they demonstrate using diffferent features
+exclude = ["examples/no-service-gen", "examples/service-gen-no-runtime"]
