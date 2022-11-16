@@ -1,4 +1,4 @@
-## Examples
+# Examples
 
 * [service-gen](service-gen) - Example showing how to generate service code that uses `prost-twirp` as a runtime
   dependency.
