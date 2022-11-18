@@ -38,11 +38,11 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_main_trait(&self, service: &Service, buf: &mut String) {
-        buf.push_str("\n");
+        buf.push('\n');
         service.comments.append_with_indent(0, buf);
         buf.push_str(&format!("pub trait {} {{", service.name));
         for method in service.methods.iter() {
-            buf.push_str("\n");
+            buf.push('\n');
             method.comments.append_with_indent(1, buf);
             buf.push_str(&format!("    {};\n", self.method_sig(method)));
         }
