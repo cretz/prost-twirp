@@ -111,6 +111,7 @@ impl TwirpServiceGenerator {
                 /// Due to <https://github.com/hyperium/hyper/issues/2051> this can't be directly
                 /// passed to `Service::serve`.
                 #[allow(dead_code)]
+                #[allow(clippy::type_complexity)]
                 pub fn new_server<T: #service_name>(v: T)
                     -> Box<dyn (
                         ::hyper::service::Service<
