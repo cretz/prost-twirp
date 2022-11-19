@@ -19,11 +19,6 @@ impl TwirpServiceGenerator {
         Default::default()
     }
 
-    fn generate_imports(&self, buf: &mut String) {
-        // None at present, but kept as a place to add any that are needed.
-        buf.push_str(quote! {}.to_string().as_str());
-    }
-
     fn generate_type_aliases(&mut self, buf: &mut String) {
         buf.push_str(&format!(
             "\n\
@@ -34,25 +29,28 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_main_trait(&self, service: &Service, buf: &mut String) {
+        // This is done with strings rather than tokens because Prost provides functions that
+        // return doc comments as strings.
         buf.push('\n');
         service.comments.append_with_indent(0, buf);
         buf.push_str(&format!("pub trait {} {{", service.name));
         for method in service.methods.iter() {
             buf.push('\n');
             method.comments.append_with_indent(1, buf);
-            buf.push_str(&format!("    {};\n", self.method_sig(method)));
+            buf.push_str(&format!("    {};\n", self.method_sig_tokens(method)));
         }
         buf.push_str("}\n");
     }
 
-    fn method_sig(&self, method: &Method) -> String {
-        format!(
-            "fn {0}(&self, i: {1}::PTReq<{2}>) -> {1}::PTRes<{3}>",
-            method.name,
-            self.prost_twirp_mod(),
-            method.input_type,
-            method.output_type
-        )
+    fn method_sig_tokens(&self, method: &Method) -> TokenStream {
+        let name = format_ident!("{}", method.name);
+        let prost_twirp = self.prost_twirp_path();
+        let input_type = format_ident!("{}", method.input_type);
+        let output_type = format_ident!("{}", method.output_type);
+        quote! {
+            fn #name(&self, i: #prost_twirp::PTReq<#input_type>)
+                -> #prost_twirp::PTRes<#output_type>
+        }
     }
 
     fn service_name_ident(&self, service: &Service) -> proc_macro2::Ident {
@@ -129,82 +127,74 @@ impl TwirpServiceGenerator {
             }
         }
         .to_string();
-        println!("{s}");
         buf.push_str(&s);
     }
 
-    fn generate_client_struct(&self, service: &Service, buf: &mut String) {
-        buf.push_str(&format!(
-            "\npub struct {}Client(pub {}::HyperClient);\n",
-            service.name,
-            self.prost_twirp_mod()
-        ));
+    fn generate_client(&self, service: &Service, buf: &mut String) {
+        let prost_twirp_path = self.prost_twirp_path();
+        let client_name = self.client_name_ident(service);
+        let service_name = self.service_name_ident(service);
+        let methods: Vec<_> = service
+            .methods
+            .iter()
+            .map(|method| {
+                let method_sig = self.method_sig_tokens(method);
+                let url = self.method_url(service, method);
+                quote! {
+                    #method_sig {
+                        self.0.go(#url, i)
+                    }
+                }
+            })
+            .collect();
+        let toks = quote! {
+            pub struct #client_name(pub #prost_twirp_path::HyperClient);
+
+            impl #service_name for #client_name {
+                #(#methods)*
+            }
+        };
+        buf.push_str(toks.to_string().as_str());
     }
 
-    fn generate_client_impl(&self, service: &Service, buf: &mut String) {
-        buf.push_str(&format!("\nimpl {0} for {0}Client {{", service.name));
-        for method in service.methods.iter() {
-            buf.push_str(&format!(
-                "\n    {method_sig} {{\n        \
-                    self.0.go(\"{url}\", i)\n    \
-                }}\n",
-                method_sig = self.method_sig(method),
-                url = self.method_url(service, method)
-            ));
-        }
-        buf.push_str("}\n");
-    }
-
-    fn generate_server_struct(&self, service: &Service, buf: &mut String) {
-        buf.push_str(&format!(
-            "\npub struct {0}Server<T: {0} + Send + Sync + 'static>(::std::sync::Arc<T>);\n",
-            service.name
-        ));
-    }
-
-    fn generate_server_impl(&self, service: &Service, buf: &mut String) {
+    fn generate_server(&self, service: &Service, buf: &mut String) {
         let service_name = self.service_name_ident(service);
         let server_name = self.server_name_ident(service);
         let mod_path = self.prost_twirp_path();
         let match_arms: Vec<_> = service
             .methods
             .iter()
-            .map(|method| self.method_server_impl_match_case(service, method))
+            .map(|method| {
+                let path = self.method_url(service, method);
+                let method_name = format_ident!("{}", method.name);
+                quote! {
+                    #path => Box::pin(async move {
+                        let req = #mod_path::ServiceRequest::from_hyper_request(req).await?;
+                        static_service.#method_name(req).await?.to_hyper_response()
+                    }),
+                }
+            })
             .collect();
-        let handle_method = quote! {
-            fn handle(&self, req: hyper::Request<hyper::Body>)
-                -> ::std::pin::Pin<Box<
-                    dyn ::futures::Future<
-                        Output = Result<::hyper::Response<::hyper::Body>,
-                            #mod_path::ProstTwirpError>> + Send + 'static>> {
-                let static_service = ::std::sync::Arc::clone(&self.0);
-                match req.uri().path() {
-                    #(#match_arms),*
-                    _ => Box::pin(::futures::future::ok(
-                        #mod_path::ProstTwirpError::NotFound.into_hyper_response().unwrap()
-                    ))
+        let toks = quote! {
+            pub struct #server_name<T: #service_name + Send + Sync + 'static>(::std::sync::Arc<T>);
+
+            impl<T: #service_name + Send + Sync + 'static> #mod_path::HyperService for #server_name<T> {
+                fn handle(&self, req: ::hyper::Request<::hyper::Body>)
+                    -> ::std::pin::Pin<Box<
+                        dyn ::futures::Future<
+                            Output = Result<::hyper::Response<::hyper::Body>,
+                                #mod_path::ProstTwirpError>> + Send + 'static>> {
+                    let static_service = ::std::sync::Arc::clone(&self.0);
+                    match req.uri().path() {
+                        #(#match_arms),*
+                        _ => Box::pin(::futures::future::ok(
+                            #mod_path::ProstTwirpError::NotFound.into_hyper_response().unwrap()
+                        ))
+                    }
                 }
             }
         };
-        let service_impl = quote! {
-            impl<T: #service_name + Send + Sync + 'static> #mod_path::HyperService for #server_name<T> {
-                #handle_method
-            }
-        };
-        buf.push_str(service_impl.to_string().as_str());
-    }
-
-    fn method_server_impl_match_case(&self, service: &Service, method: &Method) -> TokenStream {
-        let path = self.method_url(service, method);
-        let method_name = format_ident!("{}", method.name);
-        let mod_path = self.prost_twirp_path();
-        quote! {
-            #path => Box::pin( async move {
-                let req = #mod_path::ServiceRequest::from_hyper_request(req).await?;
-                let resp = static_service.#method_name(req).await?;
-                resp.to_hyper_response()
-            }),
-        }
+        buf.push_str(toks.to_string().as_str());
     }
 
     fn method_url(&self, service: &Service, method: &Method) -> String {
@@ -217,14 +207,11 @@ impl TwirpServiceGenerator {
 
 impl ServiceGenerator for TwirpServiceGenerator {
     fn generate(&mut self, service: Service, buf: &mut String) {
-        self.generate_imports(buf);
         self.generate_type_aliases(buf);
         self.generate_main_trait(&service, buf);
         self.generate_main_impl(&service, buf);
-        self.generate_client_struct(&service, buf);
-        self.generate_client_impl(&service, buf);
-        self.generate_server_struct(&service, buf);
-        self.generate_server_impl(&service, buf);
+        self.generate_client(&service, buf);
+        self.generate_server(&service, buf);
     }
 
     fn finalize(&mut self, buf: &mut String) {
