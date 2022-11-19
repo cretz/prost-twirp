@@ -1,5 +1,10 @@
 //! Generate service code from a service definition.
 
+// Guidelines for generated code:
+//
+// Use fully-qualified paths, to reduce the chance of clashing with
+// user provided names.
+
 use proc_macro2::TokenStream;
 use prost_build::{Method, Service, ServiceGenerator};
 use quote::{format_ident, quote};
@@ -15,17 +20,8 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_imports(&self, buf: &mut String) {
-        buf.push_str(
-            quote! {
-                use std::pin::Pin;
-                use std::sync::Arc;
-
-                use futures::{self, Future};
-                use hyper::{Response, Body};
-            }
-            .to_string()
-            .as_str(),
-        );
+        // None at present, but kept as a place to add any that are needed.
+        buf.push_str(quote! {}.to_string().as_str());
     }
 
     fn generate_type_aliases(&mut self, buf: &mut String) {
@@ -117,11 +113,13 @@ impl TwirpServiceGenerator {
                 pub fn new_server<T: #service_name + Send + Sync +'static>(v: T)
                     -> Box<dyn (
                         ::hyper::service::Service<
-                            ::hyper::Request<Body>,
-                            Response=::hyper::Response<Body>,
+                            ::hyper::Request<::hyper::Body>,
+                            Response=::hyper::Response<::hyper::Body>,
                             Error=::hyper::Error,
-                            Future=Pin<Box<
-                                dyn (Future<Output=Result<Response<Body>, ::hyper::Error>>) + Send
+                            Future=::std::pin::Pin<Box<
+                                dyn (::futures::Future<
+                                    Output=Result<::hyper::Response<::hyper::Body>,
+                                    ::hyper::Error>>) + Send
                             >>
                         >
                     ) + Send + Sync>
@@ -175,8 +173,11 @@ impl TwirpServiceGenerator {
             .collect();
         let handle_method = quote! {
             fn handle(&self, req: hyper::Request<hyper::Body>)
-                -> Pin<Box<dyn Future<Output = Result<Response<Body>, #mod_path::ProstTwirpError>> + Send + 'static>> {
-                let static_service = Arc::clone(&self.0);
+                -> ::std::pin::Pin<Box<
+                    dyn ::futures::Future<
+                        Output = Result<::hyper::Response<::hyper::Body>,
+                            #mod_path::ProstTwirpError>> + Send + 'static>> {
+                let static_service = ::std::sync::Arc::clone(&self.0);
                 match req.uri().path() {
                     #(#match_arms),*
                     _ => Box::pin(::futures::future::ok(
