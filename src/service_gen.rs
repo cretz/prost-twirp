@@ -33,7 +33,10 @@ impl TwirpServiceGenerator {
         // return doc comments as strings.
         buf.push('\n');
         service.comments.append_with_indent(0, buf);
-        buf.push_str(&format!("pub trait {} {{", service.name));
+        buf.push_str(&format!(
+            "pub trait {}: Send + Sync + 'static {{",
+            service.name
+        ));
         for method in service.methods.iter() {
             buf.push('\n');
             method.comments.append_with_indent(1, buf);
@@ -108,7 +111,7 @@ impl TwirpServiceGenerator {
                 /// Due to <https://github.com/hyperium/hyper/issues/2051> this can't be directly
                 /// passed to `Service::serve`.
                 #[allow(dead_code)]
-                pub fn new_server<T: #service_name + Send + Sync +'static>(v: T)
+                pub fn new_server<T: #service_name>(v: T)
                     -> Box<dyn (
                         ::hyper::service::Service<
                             ::hyper::Request<::hyper::Body>,
@@ -176,9 +179,9 @@ impl TwirpServiceGenerator {
             })
             .collect();
         let toks = quote! {
-            pub struct #server_name<T: #service_name + Send + Sync + 'static>(::std::sync::Arc<T>);
+            pub struct #server_name<T: #service_name>(::std::sync::Arc<T>);
 
-            impl<T: #service_name + Send + Sync + 'static> #mod_path::HyperService for #server_name<T> {
+            impl<T: #service_name> #mod_path::HyperService for #server_name<T> {
                 fn handle(&self, req: ::hyper::Request<::hyper::Body>)
                     -> ::std::pin::Pin<Box<
                         dyn ::futures::Future<
