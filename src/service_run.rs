@@ -100,6 +100,15 @@ impl<T: Message + Default + 'static> ServiceRequest<T> {
     pub async fn from_hyper_request(
         req: Request<Body>,
     ) -> Result<ServiceRequest<T>, ProstTwirpError> {
+        if req.method() != Method::POST {
+            return Err(ProstTwirpError::InvalidMethod);
+        } else if req
+            .headers()
+            .get(CONTENT_TYPE)
+            .map_or(true, |v| v != PROTOBUF_CONTENT_TYPE)
+        {
+            return Err(ProstTwirpError::InvalidContentType);
+        }
         let uri = req.uri().clone();
         let method = req.method().clone();
         let version = req.version();
@@ -551,26 +560,12 @@ impl<T: 'static + HyperService + Send + Sync> Service<Request<Body>> for HyperSe
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        if req.method() != Method::POST {
-            Box::pin(future::ready(
-                ProstTwirpError::InvalidMethod.into_hyper_response(),
-            ))
-        } else if req
-            .headers()
-            .get(CONTENT_TYPE)
-            .map_or(true, |v| v != PROTOBUF_CONTENT_TYPE)
-        {
-            Box::pin(future::ready(
-                ProstTwirpError::InvalidContentType.into_hyper_response(),
-            ))
-        } else {
-            // Ug: https://github.com/tokio-rs/tokio-service/issues/9
-            let service = self.service.clone();
-            Box::pin(
-                service
-                    .handle(req)
-                    .or_else(|err| future::ready(err.into_hyper_response())),
-            )
-        }
+        // Ug: https://github.com/tokio-rs/tokio-service/issues/9
+        let service = self.service.clone();
+        Box::pin(
+            service
+                .handle(req)
+                .or_else(|err| future::ready(err.into_hyper_response())),
+        )
     }
 }
