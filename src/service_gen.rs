@@ -202,8 +202,9 @@ impl TwirpServiceGenerator {
     }
 
     fn method_url(&self, service: &Service, method: &Method) -> String {
+        // https://twitchtv.github.io/twirp/docs/routing.html#http-routes
         format!(
-            "/twirp/{}/{}.{}",
+            "/twirp/{}.{}/{}",
             service.package, service.proto_name, method.proto_name
         )
     }
