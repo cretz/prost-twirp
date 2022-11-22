@@ -1,15 +1,11 @@
-#![allow(unused_imports)]
 use std::convert::Infallible;
 use std::env;
-use std::thread;
 use std::time::Duration;
 
 use futures::channel::oneshot;
 use futures::future;
-use futures::TryFutureExt;
 use hyper::server::Server;
 use hyper::service::make_service_fn;
-use hyper::service::service_fn;
 use hyper::Client;
 
 mod service {
