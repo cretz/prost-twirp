@@ -22,8 +22,8 @@ impl TwirpServiceGenerator {
     fn generate_type_aliases(&mut self, buf: &mut String) {
         buf.push_str(&format!(
             "\n\
-                pub type ServiceRequest<I> = {0}::ServiceRequest<I>;\n\
-                pub type PTRes<O> = {0}::PTRes<O>;\n",
+                pub use {0}::ServiceRequest;\n\
+                pub use {0}::PTRes;\n",
             self.prost_twirp_mod()
         ));
     }
@@ -51,7 +51,7 @@ impl TwirpServiceGenerator {
         let input_type = format_ident!("{}", method.input_type);
         let output_type = format_ident!("{}", method.output_type);
         quote! {
-            fn #name(&self, i: #prost_twirp::ServiceRequest<#input_type>)
+            fn #name(&self, request: #prost_twirp::ServiceRequest<#input_type>)
                 -> #prost_twirp::PTRes<#output_type>
         }
     }
@@ -146,7 +146,7 @@ impl TwirpServiceGenerator {
                 let url = self.method_url(service, method);
                 quote! {
                     #method_sig {
-                        self.0.go(#url, i)
+                        self.0.go(#url, request)
                     }
                 }
             })
