@@ -4,6 +4,7 @@ version = "0.2.0-pre"
 authors = ["Martin Pool", "Chad Retz <chad.retz@gmail.com>"]
 description = "Code generator and library for calling/serving Twirp services in Rust using prost and hyper"
 license = "MIT"
+features = ["rpc", "protobuf", "async", "hyper", "http"]
 repository = "https://github.com/cretz/prost-twirp"
 documentation = "https://docs.rs/prost-twirp"
 readme = "README.md"
