@@ -1,7 +1,7 @@
 [package]
 name = "prost-twirp-example-errors"
 version = "0.2.0-pre"
-authors = ["Chad Retz <chad.retz@gmail.com>"]
+authors = ["Martin Pool", "Chad Retz <chad.retz@gmail.com>"]
 build = "build.rs"
 publish = false
 edition = "2021"

@@ -1,7 +1,7 @@
 [package]
 name = "prost-twirp"
 version = "0.2.0-pre"
-authors = ["Chad Retz <chad.retz@gmail.com>"]
+authors = ["Martin Pool", "Chad Retz <chad.retz@gmail.com>"]
 description = "Code generator and library for calling/serving Twirp services in Rust using prost and hyper"
 license = "MIT"
 repository = "https://github.com/cretz/prost-twirp"
