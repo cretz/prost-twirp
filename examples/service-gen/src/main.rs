@@ -58,7 +58,10 @@ async fn main() {
 
 pub struct HaberdasherService;
 impl service::Haberdasher for HaberdasherService {
-    fn make_hat(&self, req: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
+    fn make_hat(
+        &self,
+        req: service::ServiceRequest<service::Size>,
+    ) -> service::PTRes<service::Hat> {
         Box::pin(future::ok(
             service::Hat {
                 size: req.input.inches,

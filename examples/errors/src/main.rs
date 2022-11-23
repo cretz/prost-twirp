@@ -72,7 +72,7 @@ async fn main() {
 
 pub struct HaberdasherService;
 impl service::Haberdasher for HaberdasherService {
-    fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
+    fn make_hat(&self, i: service::ServiceRequest<service::Size>) -> service::PTRes<service::Hat> {
         Box::pin(if i.input.inches < 1 {
             future::err(
                 TwirpError::new_meta(

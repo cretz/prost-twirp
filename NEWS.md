@@ -16,6 +16,8 @@
 * Changed the primary repo to
   <https://github.com/sourcefrog/prost-twirp>.
   
+* Removed `PTReq<T>` type alias: just say `ServiceRequest<T>`.
+  
 ## 0.1.0
 
 * Initial release.

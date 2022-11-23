@@ -86,11 +86,10 @@ This generates the following trait:
 /// A Haberdasher makes hats for clients.
 pub trait Haberdasher {
     /// MakeHat produces a hat of mysterious, randomly-selected color!
-    fn make_hat(&self, i: PTReq<Size>) -> PTRes<Hat>;
+    fn make_hat(&self, i: ServiceRequest<Size>) -> PTRes<Hat>;
 }
 ```
 
-[PTReq](https://docs.rs/prost-twirp/*/prost_twirp/type.PTReq.html) is just a `ServiceRequest`.
 [PTRes](https://docs.rs/prost-twirp/*/prost_twirp/type.PTRes.html) is
 `Box<Future<Item = ServiceResponse<O>, Error = ProstTwirpError>>`. This trait is used by both the client and the server.
 
@@ -128,7 +127,7 @@ The same trait that is used for the client is what must be implemented as a serv
 ```rust
 pub struct HaberdasherService;
 impl service::Haberdasher for HaberdasherService {
-    fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
+    fn make_hat(&self, i: service::ServiceRequest<service::Size>) -> service::PTRes<service::Hat> {
         Box::new(future::ok(
             service::Hat { size: i.input.inches, color: "blue".to_string(), name: "fedora".to_string() }.into()
         ))
@@ -145,7 +144,7 @@ example of not accepting any size outside of some bounds:
 ```rust
 pub struct HaberdasherService;
 impl service::Haberdasher for HaberdasherService {
-    fn make_hat(&self, i: service::PTReq<service::Size>) -> service::PTRes<service::Hat> {
+    fn make_hat(&self, i: service::ServiceRequest<service::Size>) -> service::PTRes<service::Hat> {
         Box::new(future::result(
             if i.input.inches < 1 {
                 Err(TwirpError::new(StatusCode::BadRequest, "too_small", "Size too small")
