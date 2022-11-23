@@ -211,8 +211,7 @@ future of `ServiceResponse<Vec<u8>>`. Inside the handler, `prost`-built structs 
 
 **Why no JSON support?**
 
-This could be done soon. I am investigating whether this is as easy as a couple of `serde` attributes or if it is more
-involved.
+This could be done soon, probably using [`pbjson`](https://docs.rs/pbjson/).
 
 **Why does my server service impl have to be `'static`?**
 
