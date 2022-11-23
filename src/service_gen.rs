@@ -20,12 +20,15 @@ impl TwirpServiceGenerator {
     }
 
     fn generate_type_aliases(&mut self, buf: &mut String) {
-        buf.push_str(&format!(
-            "\n\
-                pub use {0}::ServiceRequest;\n\
-                pub use {0}::PTRes;\n",
-            self.prost_twirp_mod()
-        ));
+        let mod_path = self.prost_twirp_path();
+        buf.push_str(
+            quote! {
+                pub use #mod_path::ServiceRequest;
+                pub use #mod_path::PTRes;
+            }
+            .to_string()
+            .as_str(),
+        );
     }
 
     fn generate_main_trait(&self, service: &Service, buf: &mut String) {
@@ -74,14 +77,6 @@ impl TwirpServiceGenerator {
             quote! { #mod_name }
         } else {
             quote! { ::#mod_name }
-        }
-    }
-
-    fn prost_twirp_mod(&self) -> &str {
-        if self.embed_client {
-            "prost_twirp"
-        } else {
-            "::prost_twirp"
         }
     }
 
