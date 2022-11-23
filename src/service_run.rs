@@ -13,9 +13,6 @@ use hyper::service::Service;
 use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri, Version};
 use prost::{DecodeError, EncodeError, Message};
 
-pub type FutReq<T> =
-    Box<dyn Future<Output = Result<ServiceRequest<T>, ProstTwirpError>> + Send + 'static>;
-
 /// The type of every service response
 pub type PTRes<O> =
     Pin<Box<dyn Future<Output = Result<ServiceResponse<O>, ProstTwirpError>> + Send + 'static>>;
