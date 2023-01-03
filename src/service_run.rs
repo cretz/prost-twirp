@@ -20,22 +20,22 @@ pub type PTRes<O> =
 static JSON_CONTENT_TYPE: &str = "application/json";
 static PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
 
-/// A request with HTTP info and the serialized input object
+/// A request with HTTP info and a proto request payload object.
 #[derive(Debug)]
 pub struct ServiceRequest<T: Message> {
     /// The URI of the original request
     ///
     /// When using a client, this will be overridden with the proper URI. It is only valuable for servers.
     pub uri: Uri,
-    /// The request method; should always be Post
+    /// The request method; should always be `POST`.
     pub method: Method,
-    /// The HTTP version, rarely changed from the default
+    /// The HTTP version, rarely changed from the default.
     pub version: Version,
     /// The set of headers
     ///
     /// Should always at least have `Content-Type`. Clients will override `Content-Length` on serialization.
     pub headers: HeaderMap,
-    // The request body as a proto `Message`.
+    /// The request body as a proto `Message`, representing the arguments of the proto rpc.
     pub input: T,
 }
 
@@ -128,7 +128,7 @@ impl<T: Message + Default + 'static> ServiceRequest<T> {
     }
 }
 
-/// A response with HTTP info and the output object as a [Message].
+/// A response with HTTP info and the output object as a protobuf [Message].
 #[derive(Debug)]
 pub struct ServiceResponse<M: Message> {
     /// The HTTP version
