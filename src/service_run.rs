@@ -226,7 +226,7 @@ impl<M: Message + Default> ServiceResponse<M> {
 }
 
 /// A JSON-serializable Twirp error
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TwirpError {
     pub status: StatusCode,
     pub error_type: String,
