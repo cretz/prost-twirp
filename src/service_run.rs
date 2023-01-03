@@ -333,6 +333,7 @@ impl From<TwirpError> for ProstTwirpError {
 
 /// An error that can occur during a call to a Twirp service
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ProstTwirpError {
     /// A standard Twirp error with a type, message, and some metadata
     TwirpError(TwirpError),
